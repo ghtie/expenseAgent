@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.xlsx
+.DS_Store
+venv/
+.venv/
+config.json

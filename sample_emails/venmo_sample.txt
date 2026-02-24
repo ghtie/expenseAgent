@@ -1,0 +1,14 @@
+From: venmo@venmo.com
+To: you@example.com
+Subject: You paid Jeffrey He $25.25
+
+Hi there,
+
+You paid Jeffrey He $25.25 on February 23, 2026.
+
+Note: "Dinner at Nobu 🍣"
+
+You can view this payment at venmo.com.
+
+Thanks,
+Venmo

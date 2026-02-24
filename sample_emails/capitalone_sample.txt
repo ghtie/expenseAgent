@@ -1,0 +1,10 @@
+From: capitalone@notification.capitalone.com
+To: you@example.com
+Subject: A new transaction was charged to your account
+
+A purchase was charged to your account.
+About your Quicksilver Credit Card ending in 2530
+
+As requested, we’re notifying you that on February 21, 2026, at WWW.CSCSW.COM, a pending authorization or purchase in the amount of $5.25 was placed or charged on your Quicksilver Credit Card.
+
+Note: You’ll receive this notification for both purchases and pending authorizations, such as car rentals, hotel reservations and gas purchases, even if an actual transaction hasn’t taken place.
