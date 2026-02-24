@@ -8,13 +8,12 @@ class ExcelError(Exception):
     pass
 
 
-def read_recent_rows(config: dict, limit: int = 50) -> list[dict]:
+def read_all_categories(config: dict) -> dict:
     """
-    Read the last `limit` rows from the configured Excel sheet and return
-    deduplicated item→category pairs for use as categorization history.
+    Read all rows from the Excel sheet and return an item→category mapping.
 
-    Returns a list of {"item": ..., "category": ...} dicts (one per unique item).
-    Returns an empty list if the file/sheet is missing or empty.
+    Used by the --seed command to bootstrap categories.json.
+    Returns an empty dict if the file/sheet is missing or empty.
     """
     excel_path = config["excel_path"]
     sheet_name = config["sheet_name"]
@@ -22,25 +21,22 @@ def read_recent_rows(config: dict, limit: int = 50) -> list[dict]:
     try:
         wb = openpyxl.load_workbook(excel_path, read_only=True)
     except (FileNotFoundError, PermissionError):
-        return []
+        return {}
 
     if sheet_name not in wb.sheetnames:
         wb.close()
-        return []
+        return {}
 
     ws = wb[sheet_name]
     rows = list(ws.iter_rows(min_col=5, max_col=6, values_only=True))
     wb.close()
 
-    # Take the last `limit` data rows (skip header if present)
-    recent = rows[-limit:]
-
-    seen = {}
-    for category, item in recent:
+    mapping = {}
+    for category, item in rows:
         if item and category:
-            seen[str(item)] = str(category)
+            mapping[str(item)] = str(category)
 
-    return [{"item": item, "category": cat} for item, cat in seen.items()]
+    return mapping
 
 
 def append_row(config: dict, transaction: dict) -> None:

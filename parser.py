@@ -22,7 +22,12 @@ Travel - Special Events, Travel - Transportation, Utilities
 Rules:
 - date: MM/DD/YYYY format
 - amount: positive float, no dollar sign, no commas
-- item: concise merchant or sender name (under 60 characters)
+- item: the core merchant or brand name only, with proper capitalization. \
+Strip away prefixes, suffixes, and filler words (e.g. "dinner at", "purchase at", \
+"payment to", location suffixes, transaction IDs). \
+Examples: "Dinner at Nobu Malibu" → "Nobu", "UBER EATS" → "Uber Eats", \
+"amazon.com" → "Amazon", "SQ *Blue Bottle Coffee" → "Blue Bottle Coffee", \
+"Netflix Monthly Sub" → "Netflix"
 - category: must be chosen from the list above — pick the single best match
 - Return ONLY a ```json ... ``` fenced JSON object. No other text.
 - If a field cannot be determined, set it to null."""
@@ -48,7 +53,7 @@ SOURCE_PROMPTS = {
 }
 
 
-def parse_transaction(email_text: str, source: str, config: dict, history: list[dict] | None = None) -> dict:
+def parse_transaction(email_text: str, source: str, config: dict) -> dict:
     """
     Call the Claude API to extract and categorize a transaction from email text.
 
@@ -67,13 +72,6 @@ def parse_transaction(email_text: str, source: str, config: dict, history: list[
     user_prompt = user_prompt_template.format(email_text=email_text)
 
     system_prompt = SYSTEM_PROMPT
-    if history:
-        lines = "\n".join(f"- {h['item']} → {h['category']}" for h in history)
-        system_prompt += (
-            "\n\nPast categorizations (use these to stay consistent):\n"
-            + lines
-            + "\n\nIf the merchant matches a past entry, use the same category."
-        )
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 

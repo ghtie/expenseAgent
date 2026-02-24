@@ -6,6 +6,7 @@ Usage:
     python main.py                       # paste mode
     python main.py --file email.txt      # plain-text file
     python main.py --file email.eml      # .eml file
+    python main.py --seed                # bootstrap categories.json from Excel
 """
 
 import argparse
@@ -16,6 +17,7 @@ import sys
 from dotenv import load_dotenv
 from rich.console import Console
 
+import category_store
 import display
 import email_reader
 import excel_writer
@@ -49,11 +51,35 @@ def parse_args() -> argparse.Namespace:
         metavar="PATH",
         help="Path to a .txt or .eml email file (omit for paste mode)",
     )
+    p.add_argument(
+        "--seed",
+        action="store_true",
+        help="Bootstrap categories.json from existing Excel data, then exit",
+    )
     return p.parse_args()
+
+
+def seed_categories(config: dict) -> None:
+    """Read all rows from Excel and write the item→category mapping to categories.json."""
+    display.print_info("Reading all rows from Excel...")
+    mapping = excel_writer.read_all_categories(config)
+    if not mapping:
+        display.print_error("No data found in the Excel sheet.")
+        sys.exit(1)
+    category_store.save(mapping)
+    display.print_info(f"Wrote {len(mapping)} entries to categories.json")
 
 
 def main() -> None:
     load_dotenv()
+
+    args = parse_args()
+    config = load_config("config.json")
+
+    # Handle --seed: bootstrap categories.json and exit
+    if args.seed:
+        seed_categories(config)
+        return
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         display.print_error(
@@ -62,11 +88,11 @@ def main() -> None:
         )
         sys.exit(1)
 
-    args = parse_args()
-    config = load_config("config.json")
-
     console.print("\n[bold cyan]Expense Agent[/bold cyan] — Financial Email Parser")
     console.print("─" * 50)
+
+    # Load local category lookup
+    categories = category_store.load()
 
     # Step 1: Read email text
     try:
@@ -86,24 +112,29 @@ def main() -> None:
     if source != "unknown":
         display.print_info(f"Detected email source: {source}")
 
-    # Step 3: Parse and categorize with Claude
-    history = excel_writer.read_recent_rows(config)
+    # Step 3: Parse with Claude
     display.print_info("Parsing transaction with Claude...\n")
     try:
-        transaction = expense_parser.parse_transaction(email_text, source, config, history=history)
+        transaction = expense_parser.parse_transaction(email_text, source, config)
     except expense_parser.ParsingError as exc:
         display.print_error(str(exc))
         sys.exit(1)
 
-    # Step 4: Handle split
+    # Step 4: Local category override for known merchants
+    stored_category = category_store.lookup(categories, transaction["item"])
+    if stored_category:
+        display.print_info(f"Category from local lookup: {stored_category}")
+        transaction["category"] = stored_category
+
+    # Step 5: Handle split
     transaction["amount"] = splitter.prompt_split(transaction["amount"])
 
-    # Step 5: Preview + optional corrections
+    # Step 6: Preview + optional corrections
     display.show_preview(transaction)
     if display.ask_corrections(transaction):
         display.show_preview(transaction)
 
-    # Step 6: Confirm and write
+    # Step 7: Confirm and write
     if display.ask_confirm():
         try:
             excel_writer.append_row(config, transaction)
@@ -111,6 +142,10 @@ def main() -> None:
         except excel_writer.ExcelError as exc:
             display.print_error(str(exc))
             sys.exit(1)
+
+        # Upsert the item→category mapping
+        categories[transaction["item"]] = transaction["category"]
+        category_store.save(categories)
     else:
         display.print_cancelled()
 
