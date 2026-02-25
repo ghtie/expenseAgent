@@ -1,135 +1,142 @@
-import json
-import os
-import re
+"""
+Regex-based parsers for Capital One and Venmo transaction emails.
 
-import anthropic
+No external API calls — extracts date, merchant/item, and amount directly
+from the email text using known email formats.
+"""
+
+import re
+from datetime import datetime
 
 
 class ParsingError(Exception):
     pass
 
 
-SYSTEM_PROMPT = """You are a financial data extraction assistant. Extract transaction data from \
-financial notification emails and return structured JSON.
+# Capital One format (plain text from Gmail API has line breaks mid-sentence):
+# "on February 21, 2026, at\nWWW.CSCSW.COM, a pending authorization or purchase
+#  in the amount of $5.25\nwas placed or charged on your ..."
+_CAPITALONE_PATTERN = re.compile(
+    r"on\s+(?P<date>[A-Z][a-z]+\s+\d{1,2},\s*\d{4}),\s*"
+    r"at\s+(?P<merchant>.+?),\s*"
+    r"a\s+pending\s+authorization\s+or\s+purchase\s+in\s+the\s+amount\s+of\s+"
+    r"\$(?P<amount>[\d,]+\.\d{2})",
+    re.IGNORECASE | re.DOTALL,
+)
 
-Classify into exactly one category from this list:
-Apartment Necessities, Clothing & Shoes, Education, Electricity, Entertainment, \
-Essentials, Food & Dining, Gift, Groceries, Health, Hobbies, Misc, Phone, \
-School, Skincare & Makeup, Special Events, Subscriptions, Transportation, \
-Travel - Flight, Travel - Food & Dining, Travel - Hotel, Travel - Misc, \
-Travel - Special Events, Travel - Transportation, Utilities
+# Venmo format (subject line):
+# "Jeffrey He paid your $10.31 request"
+_VENMO_SUBJECT_AMOUNT = re.compile(
+    r"paid your \$(?P<amount>[\d,]+\.\d{2}) request",
+    re.IGNORECASE,
+)
 
-Rules:
-- date: MM/DD/YYYY format
-- amount: positive float, no dollar sign, no commas
-- item: the core merchant or brand name only, with proper capitalization. \
-Strip away prefixes, suffixes, and filler words (e.g. "dinner at", "purchase at", \
-"payment to", location suffixes, transaction IDs). \
-Examples: "Dinner at Nobu Malibu" → "Nobu", "UBER EATS" → "Uber Eats", \
-"amazon.com" → "Amazon", "SQ *Blue Bottle Coffee" → "Blue Bottle Coffee", \
-"Netflix Monthly Sub" → "Netflix"
-- category: must be chosen from the list above — pick the single best match
-- Return ONLY a ```json ... ``` fenced JSON object. No other text.
-- If a field cannot be determined, set it to null."""
+# Venmo date in the transaction details section:
+# "Date\nFeb 19, 2026" or "Date Feb 19, 2026"
+_VENMO_DATE = re.compile(
+    r"Date\s+(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4})",
+)
 
-# Source-specific user prompts. To add a new email provider:
-# 1. Add a detection rule in email_reader.detect_source()
-# 2. Add a prompt entry here with the same key name
-SOURCE_PROMPTS = {
-    "capitalone": (
-        "Here is a Capital One credit card transaction alert:\n---\n{email_text}\n---\n"
-        "Extract the transaction and return the JSON."
-    ),
-    "venmo": (
-        "Here is a Venmo payment notification:\n---\n{email_text}\n---\n"
-        "Extract the payment as a transaction. The 'item' should be the Venmo payment "
-        "note/memo if one exists, otherwise use the sender's or recipient's name. "
-        "The amount is the dollar value that was paid or charged. Return the JSON."
-    ),
-    "unknown": (
-        "Here is a financial notification email:\n---\n{email_text}\n---\n"
-        "Extract any transaction details you can find and return the JSON."
-    ),
-}
+# Venmo note — appears between "paid you" amount and "See transaction"
+# In plain text: "{Name} paid you\n$10.31\n{note}\nSee transaction"
+_VENMO_NOTE = re.compile(
+    r"paid you\s+\$[\d,.]+\s+(?P<note>.+?)\s+See transaction",
+    re.DOTALL,
+)
 
 
-def parse_transaction(email_text: str, source: str, config: dict) -> dict:
-    """
-    Call the Claude API to extract and categorize a transaction from email text.
+def _parse_date(date_str: str) -> str:
+    """Convert a date string like 'February 19, 2026' or 'Feb 19, 2026' to MM/DD/YYYY."""
+    for fmt in ("%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(date_str.strip(), fmt).strftime("%m/%d/%Y")
+        except ValueError:
+            continue
+    raise ParsingError(f"Could not parse date: '{date_str}'")
 
-    Args:
-        email_text: Raw email body text.
-        source: Provider key from email_reader.detect_source() (e.g. "capitalone").
-        config: Loaded config.json dict (must contain "model" key).
 
-    Returns:
-        dict with keys: date (str), category (str), item (str), amount (float)
+def _clean_merchant(raw: str) -> str:
+    """Clean up a Capital One merchant name into a readable item name."""
+    cleaned = raw.strip()
+    # Collapse any whitespace/newlines into single spaces
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    # Strip "WWW." prefix and ".COM"/".NET"/etc suffix for URLs
+    cleaned = re.sub(r"^WWW\.", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\.(COM|NET|ORG)$", "", cleaned, flags=re.IGNORECASE)
+    # Remove trailing numbers/codes (e.g. "STAR OSCO 4572" → "Star Osco")
+    cleaned = re.sub(r"\s*#?\d{3,}$", "", cleaned)
+    # Title-case it
+    return cleaned.title()
 
-    Raises:
-        ParsingError: if Claude's response cannot be parsed or required fields are null.
-    """
-    user_prompt_template = SOURCE_PROMPTS.get(source, SOURCE_PROMPTS["unknown"])
-    user_prompt = user_prompt_template.format(email_text=email_text)
 
-    system_prompt = SYSTEM_PROMPT
-
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-    try:
-        message = client.messages.create(
-            model=config.get("model", "claude-opus-4-6"),
-            max_tokens=512,
-            temperature=0,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-    except anthropic.APIError as exc:
-        raise ParsingError(f"Claude API error: {exc}")
-
-    response_text = message.content[0].text
-    data = _extract_json(response_text)
-
-    # Validate required fields
-    missing = [field for field in ("date", "category", "item", "amount") if data.get(field) is None]
-    if missing:
+def parse_capitalone(email_text: str) -> dict:
+    """Extract transaction from a Capital One alert email."""
+    match = _CAPITALONE_PATTERN.search(email_text)
+    if not match:
         raise ParsingError(
-            f"Could not extract the following fields from the email: {', '.join(missing)}.\n"
-            "Make sure you pasted a valid Capital One or Venmo notification."
+            "Could not parse Capital One email. Expected format: "
+            "'on {date}, at {merchant}, a pending authorization or purchase "
+            "in the amount of ${amount}'"
         )
 
     return {
-        "date": str(data["date"]),
-        "category": str(data["category"]),
-        "item": str(data["item"]),
-        "amount": float(data["amount"]),
+        "date": _parse_date(match.group("date")),
+        "item": _clean_merchant(match.group("merchant")),
+        "amount": float(match.group("amount").replace(",", "")),
+        "category": "Misc",
     }
 
 
-def _extract_json(response_text: str) -> dict:
-    """
-    Extract a JSON object from Claude's response.
+def parse_venmo(email_text: str, subject: str) -> dict:
+    """Extract transaction from a Venmo payment email."""
+    # Amount from subject line (most reliable)
+    amount_match = _VENMO_SUBJECT_AMOUNT.search(subject)
+    if not amount_match:
+        raise ParsingError(
+            "Could not parse Venmo amount from subject. "
+            f"Expected format: '... paid your $X.XX request'. Got: '{subject}'"
+        )
+    amount = float(amount_match.group("amount").replace(",", ""))
 
-    Handles both fenced (```json ... ```) and bare JSON responses.
+    # Date from body
+    date_match = _VENMO_DATE.search(email_text)
+    if not date_match:
+        raise ParsingError("Could not find date in Venmo email.")
+    date = _parse_date(date_match.group("date"))
+
+    # Note from body (the item description)
+    note_match = _VENMO_NOTE.search(email_text)
+    item = note_match.group("note").strip() if note_match else "Venmo Payment"
+
+    return {
+        "date": date,
+        "item": item,
+        "amount": amount,
+        "category": "Misc",
+    }
+
+
+def parse_transaction(email_text: str, source: str, subject: str = "") -> dict:
+    """
+    Parse a transaction from email text using regex.
+
+    Args:
+        email_text: Plain text email body.
+        source: "capitalone" or "venmo".
+        subject: Email subject line (needed for Venmo amount).
+
+    Returns:
+        dict with keys: date, category, item, amount
 
     Raises:
-        ParsingError: if no valid JSON object is found.
+        ParsingError: if the email doesn't match the expected format.
     """
-    # Try to find a ```json ... ``` block first
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response_text, re.DOTALL)
-    if fenced:
-        json_str = fenced.group(1)
-    else:
-        # Fall back: look for the first {...} in the response
-        bare = re.search(r"\{.*?\}", response_text, re.DOTALL)
-        if bare:
-            json_str = bare.group(0)
-        else:
-            raise ParsingError(
-                "Could not find JSON in Claude's response.\n"
-                f"Raw response: {response_text[:200]}"
-            )
+    if source == "capitalone":
+        return parse_capitalone(email_text)
+    if source == "venmo":
+        return parse_venmo(email_text, subject)
 
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError as exc:
-        raise ParsingError(f"Failed to parse JSON from Claude's response: {exc}")
+    raise ParsingError(
+        f"Unknown email source: '{source}'. "
+        "Only Capital One and Venmo emails are supported."
+    )

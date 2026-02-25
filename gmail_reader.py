@@ -75,12 +75,20 @@ def _extract_plain_text(payload: dict) -> str:
     return ""
 
 
-def fetch_unread_emails() -> list[tuple[str, str]]:
+def _extract_subject(headers: list[dict]) -> str:
+    """Extract the Subject header from a list of Gmail message headers."""
+    for header in headers:
+        if header.get("name", "").lower() == "subject":
+            return header.get("value", "")
+    return ""
+
+
+def fetch_unread_emails() -> list[tuple[str, str, str]]:
     """
     Fetch all unread emails from the inbox.
 
     Returns:
-        List of (message_id, plain_text_body) tuples.
+        List of (message_id, subject, plain_text_body) tuples.
     """
     service = _get_service()
 
@@ -102,9 +110,11 @@ def fetch_unread_emails() -> list[tuple[str, str]]:
             format="full",
         ).execute()
 
-        body = _extract_plain_text(msg.get("payload", {}))
+        payload = msg.get("payload", {})
+        subject = _extract_subject(payload.get("headers", []))
+        body = _extract_plain_text(payload)
         if body.strip():
-            emails.append((msg_info["id"], body))
+            emails.append((msg_info["id"], subject, body))
 
     return emails
 

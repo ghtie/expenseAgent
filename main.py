@@ -12,7 +12,6 @@ import json
 import os
 import sys
 
-from dotenv import load_dotenv
 from rich.console import Console
 
 import category_store
@@ -71,7 +70,7 @@ def seed_categories(config: dict) -> None:
     display.print_info(f"Wrote {len(mapping)} entries to categories.json")
 
 
-def process_email(email_text: str, config: dict, categories: dict) -> bool:
+def process_email(email_text: str, config: dict, categories: dict, subject: str = "") -> bool:
     """
     Run the full processing pipeline on a single email.
 
@@ -83,13 +82,14 @@ def process_email(email_text: str, config: dict, categories: dict) -> bool:
 
     # Detect source
     source = email_reader.detect_source(email_text)
-    if source != "unknown":
-        display.print_info(f"Detected source: {source}")
+    if source == "unknown":
+        display.print_error("Unrecognized email source — skipping.")
+        return False
+    display.print_info(f"Detected source: {source}")
 
-    # Parse with Claude
-    display.print_info("Parsing with Claude...")
+    # Parse transaction with regex
     try:
-        transaction = expense_parser.parse_transaction(email_text, source, config)
+        transaction = expense_parser.parse_transaction(email_text, source, subject)
     except expense_parser.ParsingError as exc:
         display.print_error(str(exc))
         return False
@@ -144,9 +144,9 @@ def run_gmail(config: dict, categories: dict) -> None:
 
     console.print(f"\n[bold]Found {len(emails)} unread email(s).[/bold]\n")
 
-    for i, (msg_id, email_text) in enumerate(emails, start=1):
+    for i, (msg_id, subject, email_text) in enumerate(emails, start=1):
         console.print(f"\n[bold cyan]── Email {i}/{len(emails)} ──[/bold cyan]")
-        written = process_email(email_text, config, categories)
+        written = process_email(email_text, config, categories, subject)
 
         if written:
             gmail_reader.mark_as_read(msg_id)
@@ -159,7 +159,6 @@ def run_gmail(config: dict, categories: dict) -> None:
 
 def main() -> None:
     os.chdir(PROJECT_DIR)
-    load_dotenv()
 
     args = parse_args()
     config = load_config("config.json")
@@ -168,13 +167,6 @@ def main() -> None:
     if args.seed:
         seed_categories(config)
         return
-
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        display.print_error(
-            "ANTHROPIC_API_KEY is not set.\n"
-            "Create a .env file with: ANTHROPIC_API_KEY=sk-ant-..."
-        )
-        sys.exit(1)
 
     console.print("\n[bold cyan]Expense Agent[/bold cyan] — Financial Email Parser")
     console.print("─" * 50)
