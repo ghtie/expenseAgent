@@ -1,0 +1,32 @@
+[project]
+name = "expense-agent"
+version = "0.1.0"
+description = "Parse financial email notifications and log them to Excel"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "google-api-python-client>=2.90.0",
+    "google-auth-oauthlib>=1.0.0",
+    "openpyxl>=3.0.10",
+    "python-dotenv>=0.21.0",
+    "rich>=13.3.5",
+]
+
+[project.scripts]
+expense = "main:main"
+
+[tool.setuptools]
+py-modules = [
+    "main",
+    "category_store",
+    "display",
+    "email_reader",
+    "excel_writer",
+    "gmail_reader",
+    "parser",
+    "splitter",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

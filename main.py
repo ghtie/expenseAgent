@@ -3,10 +3,8 @@
 Expense Agent — Capital One / Venmo Email Parser
 
 Usage:
-    python main.py                       # paste mode
-    python main.py --file email.txt      # plain-text file
-    python main.py --file email.eml      # .eml file
-    python main.py --seed                # bootstrap categories.json from Excel
+    expense --gmail               # read unread emails from Gmail
+    expense --seed                # bootstrap categories.json from Excel
 """
 
 import argparse
@@ -26,6 +24,9 @@ import splitter
 
 console = Console()
 
+# Resolve project root so `expense` works from any directory
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def load_config(path: str = "config.json") -> dict:
     try:
@@ -44,12 +45,12 @@ def load_config(path: str = "config.json") -> dict:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Parse a financial email notification and log it to Excel."
+        description="Parse financial email notifications and log them to Excel."
     )
     p.add_argument(
-        "--file", "-f",
-        metavar="PATH",
-        help="Path to a .txt or .eml email file (omit for paste mode)",
+        "--gmail",
+        action="store_true",
+        help="Fetch unread emails from Gmail and process each one",
     )
     p.add_argument(
         "--seed",
@@ -70,7 +71,94 @@ def seed_categories(config: dict) -> None:
     display.print_info(f"Wrote {len(mapping)} entries to categories.json")
 
 
+def process_email(email_text: str, config: dict, categories: dict) -> bool:
+    """
+    Run the full processing pipeline on a single email.
+
+    Returns True if the transaction was written to Excel, False otherwise.
+    """
+    if not email_text.strip():
+        display.print_error("Empty email text — skipping.")
+        return False
+
+    # Detect source
+    source = email_reader.detect_source(email_text)
+    if source != "unknown":
+        display.print_info(f"Detected source: {source}")
+
+    # Parse with Claude
+    display.print_info("Parsing with Claude...")
+    try:
+        transaction = expense_parser.parse_transaction(email_text, source, config)
+    except expense_parser.ParsingError as exc:
+        display.print_error(str(exc))
+        return False
+
+    # Local category override for known merchants
+    stored_category = category_store.lookup(categories, transaction["item"])
+    if stored_category:
+        transaction["category"] = stored_category
+
+    # Action loop: show preview, let user write/split/edit/skip
+    while True:
+        display.show_compact(transaction)
+        action = display.prompt_action()
+
+        if action == "write":
+            try:
+                excel_writer.append_row(config, transaction)
+                display.print_success(config["sheet_name"], config["excel_path"])
+            except excel_writer.ExcelError as exc:
+                display.print_error(str(exc))
+                return False
+
+            categories[transaction["item"]] = transaction["category"]
+            category_store.save(categories)
+            return True
+
+        if action == "split":
+            transaction["amount"] = splitter.prompt_split(transaction["amount"])
+
+        elif action == "edit":
+            display.prompt_edit(transaction)
+
+        elif action == "skip":
+            display.print_cancelled()
+            return False
+
+
+def run_gmail(config: dict, categories: dict) -> None:
+    """Fetch unread emails from Gmail and process each one."""
+    import gmail_reader
+
+    display.print_info("Fetching unread emails from Gmail...")
+    try:
+        emails = gmail_reader.fetch_unread_emails()
+    except FileNotFoundError as exc:
+        display.print_error(str(exc))
+        sys.exit(1)
+
+    if not emails:
+        display.print_info("No unread emails found.")
+        return
+
+    console.print(f"\n[bold]Found {len(emails)} unread email(s).[/bold]\n")
+
+    for i, (msg_id, email_text) in enumerate(emails, start=1):
+        console.print(f"\n[bold cyan]── Email {i}/{len(emails)} ──[/bold cyan]")
+        written = process_email(email_text, config, categories)
+
+        if written:
+            gmail_reader.mark_as_read(msg_id)
+            display.print_info("Marked as read in Gmail.")
+        else:
+            display.print_info("Skipped — email left unread in Gmail.")
+
+    console.print(f"\n[bold green]Done processing {len(emails)} email(s).[/bold green]\n")
+
+
 def main() -> None:
+    os.chdir(PROJECT_DIR)
     load_dotenv()
 
     args = parse_args()
@@ -94,60 +182,11 @@ def main() -> None:
     # Load local category lookup
     categories = category_store.load()
 
-    # Step 1: Read email text
-    try:
-        if args.file:
-            display.print_info(f"Reading from file: {args.file}")
-        email_text = email_reader.get_email_text(args.file)
-    except FileNotFoundError as exc:
-        display.print_error(str(exc))
-        sys.exit(1)
-
-    if not email_text.strip():
-        display.print_error("No email text was provided.")
-        sys.exit(1)
-
-    # Step 2: Detect source
-    source = email_reader.detect_source(email_text)
-    if source != "unknown":
-        display.print_info(f"Detected email source: {source}")
-
-    # Step 3: Parse with Claude
-    display.print_info("Parsing transaction with Claude...\n")
-    try:
-        transaction = expense_parser.parse_transaction(email_text, source, config)
-    except expense_parser.ParsingError as exc:
-        display.print_error(str(exc))
-        sys.exit(1)
-
-    # Step 4: Local category override for known merchants
-    stored_category = category_store.lookup(categories, transaction["item"])
-    if stored_category:
-        display.print_info(f"Category from local lookup: {stored_category}")
-        transaction["category"] = stored_category
-
-    # Step 5: Handle split
-    transaction["amount"] = splitter.prompt_split(transaction["amount"])
-
-    # Step 6: Preview + optional corrections
-    display.show_preview(transaction)
-    if display.ask_corrections(transaction):
-        display.show_preview(transaction)
-
-    # Step 7: Confirm and write
-    if display.ask_confirm():
-        try:
-            excel_writer.append_row(config, transaction)
-            display.print_success(config["sheet_name"], config["excel_path"])
-        except excel_writer.ExcelError as exc:
-            display.print_error(str(exc))
-            sys.exit(1)
-
-        # Upsert the item→category mapping
-        categories[transaction["item"]] = transaction["category"]
-        category_store.save(categories)
+    if args.gmail:
+        run_gmail(config, categories)
     else:
-        display.print_cancelled()
+        display.print_error("No mode specified. Use: expense --gmail or expense --seed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -3,46 +3,36 @@ from display import console
 
 def prompt_split(full_amount: float) -> float:
     """
-    Interactively ask the user how to split the expense.
-    Returns the final amount to record.
+    Compact split prompt. Returns the final amount to record.
     """
     half = round(full_amount / 2, 2)
 
-    console.print(f"[bold]Original amount:[/bold] ${full_amount:.2f}\n")
-    console.print("How would you like to split this expense?")
-    console.print(f"  [1] No split — record full amount (${full_amount:.2f})")
-    console.print(f"  [2] 50/50 split — record half (${half:.2f})")
-    console.print( "  [3] Custom split\n")
-
     while True:
-        choice = console.input("Enter choice (1/2/3) [[bold]default: 1[/bold]]: ").strip()
+        choice = console.input(
+            f"  [1] Full [green]${full_amount:.2f}[/green]  "
+            f"[2] Half [green]${half:.2f}[/green]  "
+            f"[3] Custom "
+            f"[[bold]default: 1[/bold]]: "
+        ).strip()
 
         if choice in ("", "1"):
             return full_amount
-
         if choice == "2":
-            console.print(f"\n[dim]Amount to record: ${half:.2f}[/dim]\n")
             return half
-
         if choice == "3":
             return _prompt_custom_split(full_amount)
 
-        console.print("[red]Please enter 1, 2, or 3.[/red]")
+        console.print("  [red]Enter 1, 2, or 3.[/red]")
 
 
 def _prompt_custom_split(full_amount: float) -> float:
     """Prompt the user for a custom split amount or percentage."""
-    console.print("\nEnter your custom split:")
-    console.print("  Enter a dollar amount (e.g. 8.50) or a percentage (e.g. 60%)\n")
-
     while True:
-        raw = console.input("Split: ").strip()
+        raw = console.input("  Amount or % (e.g. 8.50 or 60%): ").strip()
         try:
-            result = _parse_custom_split(raw, full_amount)
-            console.print(f"\n[dim]Amount to record: ${result:.2f}[/dim]\n")
-            return result
+            return _parse_custom_split(raw, full_amount)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
+            console.print(f"  [red]{exc}[/red]")
 
 
 def _parse_custom_split(input_str: str, full_amount: float) -> float:
@@ -59,7 +49,7 @@ def _parse_custom_split(input_str: str, full_amount: float) -> float:
     input_str = input_str.strip()
 
     if not input_str:
-        raise ValueError("Please enter a dollar amount (e.g. 8.50) or a percentage (e.g. 60%).")
+        raise ValueError("Enter a dollar amount (e.g. 8.50) or percentage (e.g. 60%).")
 
     if input_str.endswith("%"):
         try:

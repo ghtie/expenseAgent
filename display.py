@@ -1,66 +1,113 @@
 from rich.console import Console
-from rich.table import Table
-from rich import box
 
 console = Console()
 
+CATEGORIES = [
+    "Apartment Necessities",
+    "Clothing & Shoes",
+    "Education",
+    "Electricity",
+    "Entertainment",
+    "Essentials",
+    "Food & Dining",
+    "Gift",
+    "Groceries",
+    "Health",
+    "Hobbies",
+    "Misc",
+    "Phone",
+    "School",
+    "Skincare & Makeup",
+    "Special Events",
+    "Subscriptions",
+    "Transportation",
+    "Travel - Flight",
+    "Travel - Food & Dining",
+    "Travel - Hotel",
+    "Travel - Misc",
+    "Travel - Special Events",
+    "Travel - Transportation",
+    "Utilities",
+]
 
-def show_preview(transaction: dict) -> None:
-    """Print a formatted table showing the parsed transaction."""
-    table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan")
-    table.add_column("Date", style="dim")
-    table.add_column("Category")
-    table.add_column("Item")
-    table.add_column("Amount", justify="right", style="green")
 
-    table.add_row(
-        transaction["date"],
-        transaction["category"],
-        transaction["item"],
-        f"${transaction['amount']:.2f}",
+def show_compact(transaction: dict) -> None:
+    """Print a one-line summary of the transaction."""
+    console.print(
+        f"  [dim]Date:[/dim] {transaction['date']}  "
+        f"[dim]Category:[/dim] {transaction['category']}  "
+        f"[dim]Item:[/dim] {transaction['item']}  "
+        f"[dim]Amount:[/dim] [green]${transaction['amount']:.2f}[/green]"
     )
 
-    console.print()
-    console.print(table)
-    console.print()
 
-
-def ask_corrections(transaction: dict) -> bool:
+def prompt_action() -> str:
     """
-    Prompt the user to correct item or category. Modifies transaction in place.
-    Returns True if any changes were made.
+    Show the action menu and return the user's choice.
+
+    Returns one of: "write", "split", "edit", "skip"
     """
-    response = console.input("[bold]Edit any fields?[/bold] [y/[bold]N[/bold]]: ").strip().lower()
-    if response not in ("y", "yes"):
-        return False
+    while True:
+        choice = console.input(
+            "  [bold]\\[w]rite[/bold] / \\[s]plit / \\[e]dit / \\[sk]ip "
+            "[[bold]default: w[/bold]]: "
+        ).strip().lower()
 
-    changed = False
+        if choice in ("", "w", "write"):
+            return "write"
+        if choice in ("s", "split"):
+            return "split"
+        if choice in ("e", "edit"):
+            return "edit"
+        if choice in ("sk", "skip"):
+            return "skip"
 
-    new_item = console.input(f"Item [[dim]{transaction['item']}[/dim]]: ").strip()
+        console.print("  [red]Enter w, s, e, or sk[/red]")
+
+
+def prompt_edit(transaction: dict) -> None:
+    """Prompt for item and category edits. Modifies transaction in place."""
+    new_item = console.input(f"  Item [[dim]{transaction['item']}[/dim]]: ").strip()
     if new_item:
         transaction["item"] = new_item
-        changed = True
 
-    new_cat = console.input(f"Category [[dim]{transaction['category']}[/dim]]: ").strip()
-    if new_cat:
-        transaction["category"] = new_cat
-        changed = True
-
-    return changed
+    transaction["category"] = prompt_category(transaction["category"])
 
 
-def ask_confirm() -> bool:
-    """Prompt the user to confirm writing to Excel. Default is No."""
-    response = console.input("[bold]Write this to Excel?[/bold] [y/[bold]N[/bold]]: ").strip().lower()
-    return response in ("y", "yes")
+def prompt_category(current: str) -> str:
+    """Show a numbered category picker. Returns the selected category."""
+    console.print(f"  [dim]Current: {current}[/dim]")
+
+    per_row = 3
+    for i in range(0, len(CATEGORIES), per_row):
+        chunk = CATEGORIES[i:i + per_row]
+        parts = [f"[bold]{i + j + 1:>2}[/bold]) {cat:<25}" for j, cat in enumerate(chunk)]
+        console.print("  " + " ".join(parts))
+
+    while True:
+        choice = console.input(
+            "  Category # [[bold]Enter to keep[/bold]]: "
+        ).strip()
+
+        if choice == "":
+            return current
+
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(CATEGORIES):
+                return CATEGORIES[idx]
+        except ValueError:
+            pass
+
+        console.print(f"  [red]Enter 1-{len(CATEGORIES)} or press Enter to keep[/red]")
 
 
 def print_success(sheet_name: str, excel_path: str) -> None:
-    console.print(f"\n[bold green]Row appended to sheet \"{sheet_name}\" in {excel_path}[/bold green]\n")
+    console.print(f"  [bold green]Saved to \"{sheet_name}\" in {excel_path}[/bold green]")
 
 
 def print_cancelled() -> None:
-    console.print("\n[dim]Cancelled. Nothing was written.[/dim]\n")
+    console.print("  [dim]Skipped.[/dim]")
 
 
 def print_error(message: str) -> None:

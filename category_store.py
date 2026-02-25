@@ -21,6 +21,7 @@ def save(mapping: dict, path: str = DEFAULT_PATH) -> None:
         f.write("\n")
 
 
+
 def lookup(mapping: dict, item: str) -> str | None:
     """Case-insensitive lookup for an item. Returns category or None."""
     lower = item.lower()
