@@ -17,10 +17,12 @@ expense = "main:main"
 py-modules = [
     "main",
     "category_store",
+    "dedup_store",
     "display",
     "email_reader",
     "excel_writer",
     "gmail_reader",
+    "merchant_store",
     "parser",
     "splitter",
 ]

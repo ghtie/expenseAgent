@@ -30,8 +30,12 @@ def _get_service():
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except Exception:
+                # Refresh token revoked or invalid — re-authenticate
+                creds = None
+        if not creds:
             if not os.path.exists(CREDENTIALS_FILE):
                 raise FileNotFoundError(
                     f"{CREDENTIALS_FILE} not found. "
@@ -83,9 +87,12 @@ def _extract_subject(headers: list[dict]) -> str:
     return ""
 
 
-def fetch_unread_emails() -> list[tuple[str, str, str]]:
+DEFAULT_GMAIL_QUERY = "is:unread from:(notification.capitalone.com OR venmo.com)"
+
+
+def fetch_unread_emails(query: str = DEFAULT_GMAIL_QUERY) -> list[tuple[str, str, str]]:
     """
-    Fetch all unread emails from the inbox.
+    Fetch unread emails matching the query.
 
     Returns:
         List of (message_id, subject, plain_text_body) tuples.
@@ -94,7 +101,7 @@ def fetch_unread_emails() -> list[tuple[str, str, str]]:
 
     results = service.users().messages().list(
         userId="me",
-        q="is:unread",
+        q=query,
         maxResults=50,
     ).execute()
 
@@ -113,10 +120,15 @@ def fetch_unread_emails() -> list[tuple[str, str, str]]:
         payload = msg.get("payload", {})
         subject = _extract_subject(payload.get("headers", []))
         body = _extract_plain_text(payload)
+        timestamp = int(msg.get("internalDate", 0))
         if body.strip():
-            emails.append((msg_info["id"], subject, body))
+            emails.append((msg_info["id"], subject, body, timestamp))
 
-    return emails
+    # Sort by timestamp so oldest emails are processed first
+    emails.sort(key=lambda e: e[3])
+
+    # Return without the timestamp field
+    return [(mid, subj, body) for mid, subj, body, _ in emails]
 
 
 def mark_as_read(message_id: str) -> None:

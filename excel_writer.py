@@ -105,3 +105,65 @@ def append_row(config: dict, transaction: dict) -> None:
             f"Cannot save the Excel file — it may be open in another application.\n"
             f"Close {excel_path} and try again."
         )
+
+
+def remove_last_row(config: dict) -> dict | None:
+    """
+    Remove the last data row from the Excel sheet.
+
+    Returns the removed transaction as a dict, or None if the sheet is empty.
+
+    Raises:
+        ExcelError: if the file or sheet cannot be found/written.
+    """
+    excel_path = config["excel_path"]
+    sheet_name = config["sheet_name"]
+
+    try:
+        wb = openpyxl.load_workbook(excel_path)
+    except FileNotFoundError:
+        raise ExcelError(f"Excel file not found at: {excel_path}")
+    except PermissionError:
+        raise ExcelError(
+            f"Cannot open the Excel file — it may be open in another application.\n"
+            f"Close {excel_path} and try again."
+        )
+
+    if sheet_name not in wb.sheetnames:
+        raise ExcelError(f"Sheet \"{sheet_name}\" not found in the workbook.")
+
+    ws = wb[sheet_name]
+    last_row = ws.max_row
+
+    if last_row < 2:
+        wb.close()
+        return None
+
+    # Read the row before deleting
+    date_val = ws.cell(row=last_row, column=3).value
+    amount = ws.cell(row=last_row, column=4).value
+    category = ws.cell(row=last_row, column=5).value
+    item = ws.cell(row=last_row, column=6).value
+
+    date_str = ""
+    if isinstance(date_val, datetime):
+        date_str = date_val.strftime("%m/%d/%Y")
+    elif date_val:
+        date_str = str(date_val)
+
+    ws.delete_rows(last_row)
+
+    try:
+        wb.save(excel_path)
+    except PermissionError:
+        raise ExcelError(
+            f"Cannot save the Excel file — it may be open in another application.\n"
+            f"Close {excel_path} and try again."
+        )
+
+    return {
+        "date": date_str,
+        "item": str(item) if item else "",
+        "category": str(category) if category else "",
+        "amount": float(amount) if amount else 0.0,
+    }

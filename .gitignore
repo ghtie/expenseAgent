@@ -8,6 +8,8 @@ venv/
 .venv/
 config.json
 categories.json
+merchants.json
+processed.json
 credentials.json
 token.json
 *.egg-info/

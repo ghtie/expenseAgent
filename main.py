@@ -15,9 +15,11 @@ import sys
 from rich.console import Console
 
 import category_store
+import dedup_store
 import display
 import email_reader
 import excel_writer
+import merchant_store
 import parser as expense_parser
 import splitter
 
@@ -56,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Bootstrap categories.json from existing Excel data, then exit",
     )
+    p.add_argument(
+        "--undo",
+        action="store_true",
+        help="Remove the last row written to Excel",
+    )
     return p.parse_args()
 
 
@@ -70,70 +77,90 @@ def seed_categories(config: dict) -> None:
     display.print_info(f"Wrote {len(mapping)} entries to categories.json")
 
 
-def process_email(email_text: str, config: dict, categories: dict, subject: str = "") -> bool:
+def _parse_email(email_text: str, subject: str, categories: dict, merchants: dict) -> dict | None:
     """
-    Run the full processing pipeline on a single email.
-
-    Returns True if the transaction was written to Excel, False otherwise.
+    Parse a single email into a transaction dict.
+    Returns None if unparseable. Adds '_raw_merchant' and '_msg_id' metadata.
     """
     if not email_text.strip():
-        display.print_error("Empty email text — skipping.")
-        return False
+        return None
 
-    # Detect source
     source = email_reader.detect_source(email_text)
     if source == "unknown":
-        display.print_error("Unrecognized email source — skipping.")
-        return False
-    display.print_info(f"Detected source: {source}")
+        return None
 
-    # Parse transaction with regex
     try:
-        transaction = expense_parser.parse_transaction(email_text, source, subject)
+        txn = expense_parser.parse_transaction(email_text, source, subject)
     except expense_parser.ParsingError as exc:
+        display.print_error(str(exc))
+        return None
+
+    raw_merchant = txn.pop("_raw_merchant", "")
+
+    # Merchant auto-learn lookup (provides both name + category)
+    merchant_match = merchant_store.lookup(merchants, raw_merchant)
+    if merchant_match:
+        txn["item"] = merchant_match["name"]
+        txn["category"] = merchant_match["category"]
+    else:
+        # Fall back to category-only lookup
+        stored_category = category_store.lookup(categories, txn["item"])
+        if stored_category:
+            txn["category"] = stored_category
+
+    txn["_raw_merchant"] = raw_merchant
+    return txn
+
+
+def _write_transaction(config: dict, txn: dict, raw_merchant: str,
+                       categories: dict, merchants: dict,
+                       processed_ids: set = None, msg_id: str = "") -> bool:
+    """Write a single transaction to Excel and update lookup stores."""
+    try:
+        excel_writer.append_row(config, txn)
+    except excel_writer.ExcelError as exc:
         display.print_error(str(exc))
         return False
 
-    # Local category override for known merchants
-    stored_category = category_store.lookup(categories, transaction["item"])
-    if stored_category:
-        transaction["category"] = stored_category
+    # Update categories.json
+    categories[txn["item"]] = txn["category"]
+    category_store.save(categories)
 
-    # Action loop: show preview, let user write/split/edit/skip
-    while True:
-        display.show_compact(transaction)
-        action = display.prompt_action()
+    # Update merchants.json
+    if raw_merchant:
+        merchant_store.learn(merchants, raw_merchant, txn["item"], txn["category"])
 
-        if action == "write":
-            try:
-                excel_writer.append_row(config, transaction)
-                display.print_success(config["sheet_name"], config["excel_path"])
-            except excel_writer.ExcelError as exc:
-                display.print_error(str(exc))
-                return False
+    # Track as processed for dedup
+    if processed_ids is not None and msg_id:
+        dedup_store.mark_processed(processed_ids, msg_id)
 
-            categories[transaction["item"]] = transaction["category"]
-            category_store.save(categories)
-            return True
-
-        if action == "split":
-            transaction["amount"] = splitter.prompt_split(transaction["amount"])
-
-        elif action == "edit":
-            display.prompt_edit(transaction)
-
-        elif action == "skip":
-            display.print_cancelled()
-            return False
+    return True
 
 
-def run_gmail(config: dict, categories: dict) -> None:
-    """Fetch unread emails from Gmail and process each one."""
+def run_undo(config: dict) -> None:
+    """Remove the last row from Excel."""
+    try:
+        removed = excel_writer.remove_last_row(config)
+    except excel_writer.ExcelError as exc:
+        display.print_error(str(exc))
+        sys.exit(1)
+
+    if removed is None:
+        display.print_info("No rows to undo.")
+        return
+
+    display.print_info("Removed last row:")
+    display.show_compact(removed)
+
+
+def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
+    """Fetch unread emails from Gmail and process in batch mode."""
     import gmail_reader
 
     display.print_info("Fetching unread emails from Gmail...")
+    query = config.get("gmail_query")
     try:
-        emails = gmail_reader.fetch_unread_emails()
+        emails = gmail_reader.fetch_unread_emails(query) if query else gmail_reader.fetch_unread_emails()
     except FileNotFoundError as exc:
         display.print_error(str(exc))
         sys.exit(1)
@@ -142,19 +169,110 @@ def run_gmail(config: dict, categories: dict) -> None:
         display.print_info("No unread emails found.")
         return
 
-    console.print(f"\n[bold]Found {len(emails)} unread email(s).[/bold]\n")
+    # Load dedup tracking
+    processed_ids = dedup_store.load()
 
-    for i, (msg_id, subject, email_text) in enumerate(emails, start=1):
-        console.print(f"\n[bold cyan]── Email {i}/{len(emails)} ──[/bold cyan]")
-        written = process_email(email_text, config, categories, subject)
+    console.print(f"\n[bold]Found {len(emails)} unread email(s).[/bold]")
 
-        if written:
-            gmail_reader.mark_as_read(msg_id)
-            display.print_info("Marked as read in Gmail.")
-        else:
-            display.print_info("Skipped — email left unread in Gmail.")
+    # Phase 1: Parse all emails into transactions
+    entries = []  # list of {"msg_id", "transaction", "raw_merchant"}
+    skipped_dedup = 0
+    for msg_id, subject, email_text in emails:
+        if dedup_store.is_processed(processed_ids, msg_id):
+            skipped_dedup += 1
+            continue
+        txn = _parse_email(email_text, subject, categories, merchants)
+        if txn is None:
+            display.print_info(f"Could not parse email: {subject[:60]}")
+            continue
+        raw_merchant = txn.pop("_raw_merchant", "")
+        entries.append({
+            "msg_id": msg_id,
+            "transaction": txn,
+            "raw_merchant": raw_merchant,
+        })
 
-    console.print(f"\n[bold green]Done processing {len(emails)} email(s).[/bold green]\n")
+    if skipped_dedup:
+        display.print_info(f"Skipped {skipped_dedup} already-processed email(s).")
+
+    if not entries:
+        display.print_info("No new transactions found.")
+        return
+
+    # Phase 2: Batch interaction loop
+    transactions = [e["transaction"] for e in entries]
+    statuses = ["pending"] * len(entries)
+
+    display.show_batch_table(transactions, statuses)
+
+    while True:
+        pending = [i for i, s in enumerate(statuses) if s == "pending"]
+        if not pending:
+            break
+
+        action, indices = display.prompt_batch_action(len(entries))
+
+        if action == "all":
+            for i in pending:
+                ok = _write_transaction(
+                    config, transactions[i], entries[i]["raw_merchant"],
+                    categories, merchants, processed_ids, entries[i]["msg_id"],
+                )
+                if ok:
+                    statuses[i] = "written"
+                    gmail_reader.mark_as_read(entries[i]["msg_id"])
+                else:
+                    statuses[i] = "error"
+            break
+
+        elif action == "skip":
+            for idx in indices:
+                if statuses[idx] not in ("pending", "error"):
+                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+                else:
+                    statuses[idx] = "skipped"
+            display.show_batch_table(transactions, statuses)
+
+        elif action == "edit":
+            for idx in indices:
+                if statuses[idx] not in ("pending", "error"):
+                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+                    continue
+                console.print(f"\n[bold cyan]── Editing #{idx + 1} ──[/bold cyan]")
+                display.show_compact(transactions[idx])
+                display.prompt_edit(transactions[idx])
+            display.show_batch_table(transactions, statuses)
+
+        elif action == "split":
+            for idx in indices:
+                if statuses[idx] not in ("pending", "error"):
+                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+                    continue
+                console.print(f"\n[bold cyan]── Splitting #{idx + 1} ──[/bold cyan]")
+                display.show_compact(transactions[idx])
+                transactions[idx]["amount"] = splitter.prompt_split(transactions[idx]["amount"])
+            display.show_batch_table(transactions, statuses)
+
+    # Final summary
+    written_count = statuses.count("written")
+    skipped_count = statuses.count("skipped")
+    error_count = statuses.count("error")
+
+    display.show_batch_table(transactions, statuses)
+
+    parts = [f"{written_count} written"]
+    if skipped_count:
+        parts.append(f"{skipped_count} skipped")
+    if error_count:
+        parts.append(f"{error_count} failed")
+
+    total_amount = sum(
+        t["amount"] for t, s in zip(transactions, statuses) if s == "written"
+    )
+    console.print(
+        f"\n[bold green]Done: {', '.join(parts)}. "
+        f"Total: ${total_amount:.2f}[/bold green]\n"
+    )
 
 
 def main() -> None:
@@ -168,16 +286,22 @@ def main() -> None:
         seed_categories(config)
         return
 
+    # Handle --undo: remove last row and exit
+    if args.undo:
+        run_undo(config)
+        return
+
     console.print("\n[bold cyan]Expense Agent[/bold cyan] — Financial Email Parser")
     console.print("─" * 50)
 
-    # Load local category lookup
+    # Load local lookups
     categories = category_store.load()
+    merchants = merchant_store.load()
 
     if args.gmail:
-        run_gmail(config, categories)
+        run_gmail(config, categories, merchants)
     else:
-        display.print_error("No mode specified. Use: expense --gmail or expense --seed")
+        display.print_error("No mode specified. Use: expense --gmail, expense --seed, or expense --undo")
         sys.exit(1)
 
 

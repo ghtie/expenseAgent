@@ -24,6 +24,19 @@ _CAPITALONE_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Fallback: broader pattern for Capital One template variations
+# Matches: "A purchase was charged..." or "A transaction was made..." style emails
+# Looks for any date, merchant after "at", and dollar amount nearby
+_CAPITALONE_FALLBACK = re.compile(
+    r"(?P<date>[A-Z][a-z]+\s+\d{1,2},\s*\d{4})"
+    r".*?"
+    r"at\s+(?P<merchant>.+?)"
+    r",\s*(?:a\s+)?(?:purchase|transaction|charge|pending)"
+    r".*?"
+    r"\$(?P<amount>[\d,]+\.\d{2})",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Venmo format (subject line):
 # "Jeffrey He paid your $10.31 request"
 _VENMO_SUBJECT_AMOUNT = re.compile(
@@ -63,15 +76,28 @@ def _clean_merchant(raw: str) -> str:
     # Strip "WWW." prefix and ".COM"/".NET"/etc suffix for URLs
     cleaned = re.sub(r"^WWW\.", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\.(COM|NET|ORG)$", "", cleaned, flags=re.IGNORECASE)
-    # Remove trailing numbers/codes (e.g. "STAR OSCO 4572" → "Star Osco")
-    cleaned = re.sub(r"\s*#?\d{3,}$", "", cleaned)
+    # Strip payment processor prefixes (SQ *, TST *, PP*)
+    cleaned = re.sub(r"^(SQ|TST|PP)\s*\*\s*", "", cleaned, flags=re.IGNORECASE)
+    # Remove trailing store/location codes: #62, T-1234, T-, etc.
+    cleaned = re.sub(r"\s*#\d+$", "", cleaned)
+    cleaned = re.sub(r"\s+\d{3,}$", "", cleaned)
+    cleaned = re.sub(r"\s+[A-Z]{0,2}-?\d*$", "", cleaned, flags=re.IGNORECASE)
+    # Remove location suffixes like " - Japan Town"
+    cleaned = re.sub(r"\s+-\s+\w[\w\s]*$", "", cleaned)
+    # Remove trailing single character (truncated names like "JOE S" from "JOE'S")
+    cleaned = re.sub(r"\s+[A-Za-z]$", "", cleaned)
     # Title-case it
-    return cleaned.title()
+    return cleaned.strip().title()
 
 
 def parse_capitalone(email_text: str) -> dict:
     """Extract transaction from a Capital One alert email."""
     match = _CAPITALONE_PATTERN.search(email_text)
+
+    if not match:
+        # Try broader fallback pattern
+        match = _CAPITALONE_FALLBACK.search(email_text)
+
     if not match:
         raise ParsingError(
             "Could not parse Capital One email. Expected format: "
@@ -84,6 +110,7 @@ def parse_capitalone(email_text: str) -> dict:
         "item": _clean_merchant(match.group("merchant")),
         "amount": float(match.group("amount").replace(",", "")),
         "category": "Misc",
+        "_raw_merchant": match.group("merchant"),
     }
 
 
@@ -113,6 +140,7 @@ def parse_venmo(email_text: str, subject: str) -> dict:
         "item": item,
         "amount": amount,
         "category": "Misc",
+        "_raw_merchant": "",
     }
 
 
