@@ -57,6 +57,4 @@ expense --seed
 
 ## Adding a New Email Source
 
-1. Add a detection rule in `email_reader.detect_source()`
-2. Add a regex parser function in `parser.py`
-3. Add the source to `parse_transaction()` dispatch
+Add a single entry to the `PARSERS` registry in `parser.py` with `"detect"` and `"parse"` functions — no other files need editing.

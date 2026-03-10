@@ -22,7 +22,10 @@ py-modules = [
     "email_reader",
     "excel_writer",
     "gmail_reader",
+    "json_store",
+    "lookup_utils",
     "merchant_store",
+    "merchant_utils",
     "parser",
     "splitter",
 ]
