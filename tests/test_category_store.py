@@ -2,7 +2,7 @@
 
 import json
 import pytest
-import category_store
+from expense_agent.stores import category_store
 
 
 # ---------- Load / Save ----------

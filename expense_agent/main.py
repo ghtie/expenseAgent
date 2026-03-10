@@ -14,19 +14,15 @@ import sys
 
 from rich.console import Console
 
-import category_store
-import dedup_store
-import display
-import email_reader
-import excel_writer
-import merchant_store
-import parser as expense_parser
-import splitter
+from expense_agent.stores import category_store, dedup_store, merchant_store
+from expense_agent import display, email_reader, excel_writer
+from expense_agent import parser as expense_parser
+from expense_agent import splitter
 
 console = Console()
 
 # Resolve project root so `expense` works from any directory
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def load_config(path: str = "config.json") -> dict:
@@ -159,7 +155,7 @@ def _fetch_and_parse(config, categories, merchants):
     Returns (entries, processed_ids) where entries is a list of
     {"msg_id", "transaction", "raw_merchant"} dicts.
     """
-    import gmail_reader
+    from expense_agent import gmail_reader
 
     display.print_info("Fetching unread emails from Gmail...")
     query = config.get("gmail_query")
@@ -204,7 +200,7 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
 
     Returns a list of status strings parallel to entries.
     """
-    import gmail_reader
+    from expense_agent import gmail_reader
 
     transactions = [e["transaction"] for e in entries]
     statuses = ["pending"] * len(entries)

@@ -1,8 +1,8 @@
 """Merchant auto-learn: maps raw merchant substrings to canonical name + category."""
 
-from json_store import load_json, save_json
-from lookup_utils import longest_substring_match
-from merchant_utils import normalize_merchant
+from expense_agent.stores.json_store import load_json, save_json
+from expense_agent.utils.lookup_utils import longest_substring_match
+from expense_agent.utils.merchant_utils import normalize_merchant
 
 DEFAULT_PATH = "merchants.json"
 

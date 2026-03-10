@@ -4,7 +4,7 @@ import pytest
 from io import StringIO
 from unittest.mock import patch
 
-from display import _parse_numbers, show_batch_table, prompt_category, console
+from expense_agent.display import _parse_numbers, show_batch_table, prompt_category, console
 
 
 # ---------- _parse_numbers ----------
@@ -45,7 +45,7 @@ class TestShowBatchTable:
         out = StringIO()
         test_console = console.__class__(file=out, force_terminal=True)
         with patch.object(
-            __import__("display"), "console", test_console
+            __import__("expense_agent.display", fromlist=["console"]), "console", test_console
         ):
             show_batch_table(transactions, statuses)
         output = out.getvalue()

@@ -8,7 +8,7 @@ from the email text using known email formats.
 import re
 from datetime import datetime
 
-from merchant_utils import normalize_merchant
+from expense_agent.utils.merchant_utils import normalize_merchant
 
 
 class ParsingError(Exception):

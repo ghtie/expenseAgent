@@ -29,21 +29,41 @@ expense --undo       # remove last written row
 
 ## Architecture
 
-**Entry point:** `main.py` → `main()` dispatches to `run_gmail()`, `seed_categories()`, or `run_undo()`.
+**Package structure:**
+```
+expense_agent/           # main package
+  main.py                # entry point, dispatches to run_gmail/seed_categories/run_undo
+  parser.py              # PARSERS registry, regex extractors
+  display.py             # Rich console, interactive prompts, batch table
+  splitter.py            # split transaction amounts
+  email_reader.py        # read from file/paste, detect_source delegation
+  gmail_reader.py        # Gmail API fetch, mark as read
+  excel_writer.py        # append/remove rows in .xlsx
+  stores/                # data persistence
+    category_store.py    # item→category lookup (categories.json)
+    merchant_store.py    # raw merchant→name+category (merchants.json)
+    dedup_store.py       # processed Gmail message IDs (processed.json)
+    json_store.py        # shared load/save helpers
+  utils/                 # pure helpers
+    lookup_utils.py      # fuzzy substring matching
+    merchant_utils.py    # merchant name normalization
+```
+
+**Entry point:** `expense_agent.main:main` dispatches to `run_gmail()`, `seed_categories()`, or `run_undo()`.
 
 **Pipeline flow (--gmail):**
 1. `gmail_reader` fetches unread emails via Gmail API
 2. `parser.detect_source()` identifies email type via the `PARSERS` registry
 3. `parser.parse_transaction()` dispatches to `parse_capitalone()` or `parse_venmo()` regex extractors
-4. `merchant_store` / `category_store` auto-resolve item names and categories
+4. `stores/merchant_store` / `stores/category_store` auto-resolve item names and categories
 5. `display` renders Rich tables and handles interactive edit/split/skip/write prompts
 6. `excel_writer` appends confirmed rows to the .xlsx file
-7. `dedup_store` tracks processed Gmail message IDs to prevent re-processing
+7. `stores/dedup_store` tracks processed Gmail message IDs to prevent re-processing
 
 **Shared utilities (avoid duplicating logic in stores/parser):**
-- `merchant_utils.normalize_merchant()` — single source of truth for merchant name cleaning (used by both `parser._clean_merchant()` and `merchant_store.derive_key()`)
-- `json_store.load_json()` / `save_json()` — shared JSON file I/O (used by `category_store`, `merchant_store`, `dedup_store`)
-- `lookup_utils.longest_substring_match()` — shared fuzzy matching (used by `category_store.lookup()` with `bidirectional=True`, `merchant_store.lookup()` with `bidirectional=False`)
+- `utils/merchant_utils.normalize_merchant()` — single source of truth for merchant name cleaning (used by both `parser._clean_merchant()` and `merchant_store.derive_key()`)
+- `stores/json_store.load_json()` / `save_json()` — shared JSON file I/O (used by `category_store`, `merchant_store`, `dedup_store`)
+- `utils/lookup_utils.longest_substring_match()` — shared fuzzy matching (used by `category_store.lookup()` with `bidirectional=True`, `merchant_store.lookup()` with `bidirectional=False`)
 
 **Parser registry pattern:** `parser.PARSERS` is a dict mapping source name → `{"detect": fn, "parse": fn}`. To add a new email source, add one entry to this dict — no other files need editing. `email_reader.detect_source()` delegates to `parser.detect_source()`.
 
@@ -51,11 +71,11 @@ expense --undo       # remove last written row
 
 ## Key Conventions
 
-- All modules are flat in the project root (no `src/` directory). `pyproject.toml` lists them explicitly in `py-modules`.
+- All code lives in the `expense_agent` package with `stores/` and `utils/` sub-packages. All imports use absolute paths (e.g. `from expense_agent.stores import category_store`).
 - Transactions are plain dicts with keys: `date` (MM/DD/YYYY string), `item`, `category`, `amount` (float). `_raw_merchant` is internal metadata stripped before display.
 - JSON data files (`categories.json`, `merchants.json`, `processed.json`) live in the project root alongside code. They are runtime data, not checked into git.
 - `config.json` holds `excel_path` and `sheet_name`. `credentials.json` and `token.json` are for Gmail OAuth.
 - Tests use `conftest.py` fixtures (`sample_capitalone_email`, `sample_venmo_subject`, `sample_venmo_body`, `config`, `sample_categories`, `sample_merchants`).
-- `display.py` owns the shared `Console` instance. `splitter.py` imports it as `from display import console`.
+- `display.py` owns the shared `Console` instance. `splitter.py` imports it as `from expense_agent.display import console`.
 - Excel columns: Year (A), Month (B), Date (C), Amount (D), Category (E), Item (F).
 - The splitter allows amounts exceeding the original and percentages over 100%.

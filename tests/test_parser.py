@@ -1,7 +1,7 @@
 """Tests for parser.py — date parsing, merchant cleaning, and email parsing."""
 
 import pytest
-from parser import _parse_date, _clean_merchant, parse_capitalone, parse_venmo, parse_transaction, ParsingError
+from expense_agent.parser import _parse_date, _clean_merchant, parse_capitalone, parse_venmo, parse_transaction, ParsingError
 
 
 # ---------- _parse_date ----------

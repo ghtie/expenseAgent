@@ -1,7 +1,7 @@
 """Tests for email_reader.py — detect_source and read_from_file."""
 
 import pytest
-from email_reader import detect_source, read_from_file
+from expense_agent.email_reader import detect_source, read_from_file
 
 
 # ---------- detect_source ----------

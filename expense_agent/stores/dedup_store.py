@@ -1,6 +1,6 @@
 """Track processed Gmail message IDs to prevent duplicate writes."""
 
-from json_store import load_json, save_json
+from expense_agent.stores.json_store import load_json, save_json
 
 DEFAULT_PATH = "processed.json"
 

@@ -1,7 +1,7 @@
 """Tests for splitter.py — _parse_custom_split."""
 
 import pytest
-from splitter import _parse_custom_split
+from expense_agent.splitter import _parse_custom_split
 
 
 class TestParseCustomSplit:

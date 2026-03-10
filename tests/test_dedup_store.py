@@ -2,7 +2,7 @@
 
 import json
 import pytest
-import dedup_store
+from expense_agent.stores import dedup_store
 
 
 class TestDedupStore:

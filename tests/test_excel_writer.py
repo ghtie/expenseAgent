@@ -4,7 +4,7 @@ import pytest
 import openpyxl
 from datetime import datetime
 
-from excel_writer import append_row, remove_last_row, read_all_categories, ExcelError
+from expense_agent.excel_writer import append_row, remove_last_row, read_all_categories, ExcelError
 
 
 # ---------- append_row ----------

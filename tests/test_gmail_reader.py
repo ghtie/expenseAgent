@@ -4,7 +4,7 @@ import base64
 import pytest
 from unittest.mock import MagicMock, patch
 
-from gmail_reader import _extract_subject, _extract_plain_text
+from expense_agent.gmail_reader import _extract_subject, _extract_plain_text
 
 
 # ---------- _extract_subject ----------
@@ -68,8 +68,8 @@ class TestFetchUnreadEmails:
                 "body": {"data": body_data},
             },
         }
-        with patch("gmail_reader._get_service", return_value=mock_service):
-            from gmail_reader import fetch_unread_emails
+        with patch("expense_agent.gmail_reader._get_service", return_value=mock_service):
+            from expense_agent.gmail_reader import fetch_unread_emails
             result = fetch_unread_emails()
         assert len(result) == 1
         assert result[0][0] == "msg1"
@@ -78,8 +78,8 @@ class TestFetchUnreadEmails:
     def test_empty(self):
         mock_service = MagicMock()
         mock_service.users().messages().list().execute.return_value = {}
-        with patch("gmail_reader._get_service", return_value=mock_service):
-            from gmail_reader import fetch_unread_emails
+        with patch("expense_agent.gmail_reader._get_service", return_value=mock_service):
+            from expense_agent.gmail_reader import fetch_unread_emails
             result = fetch_unread_emails()
         assert result == []
 
@@ -105,8 +105,8 @@ class TestFetchUnreadEmails:
             make_msg("b", 2000),
             make_msg("a", 1000),
         ]
-        with patch("gmail_reader._get_service", return_value=mock_service):
-            from gmail_reader import fetch_unread_emails
+        with patch("expense_agent.gmail_reader._get_service", return_value=mock_service):
+            from expense_agent.gmail_reader import fetch_unread_emails
             result = fetch_unread_emails()
         assert result[0][0] == "a"  # older first
         assert result[1][0] == "b"
@@ -117,8 +117,8 @@ class TestFetchUnreadEmails:
 class TestMarkAsRead:
     def test_calls_modify(self):
         mock_service = MagicMock()
-        with patch("gmail_reader._get_service", return_value=mock_service):
-            from gmail_reader import mark_as_read
+        with patch("expense_agent.gmail_reader._get_service", return_value=mock_service):
+            from expense_agent.gmail_reader import mark_as_read
             mark_as_read("msg123")
         mock_service.users().messages().modify.assert_called_once_with(
             userId="me",

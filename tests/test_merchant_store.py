@@ -2,7 +2,7 @@
 
 import json
 import pytest
-import merchant_store
+from expense_agent.stores import merchant_store
 
 
 # ---------- derive_key ----------

@@ -1,4 +1,4 @@
-from display import console
+from expense_agent.display import console
 
 
 def prompt_split(full_amount: float) -> float:

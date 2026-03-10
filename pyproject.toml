@@ -11,28 +11,13 @@ dependencies = [
 ]
 
 [project.scripts]
-expense = "main:main"
+expense = "expense_agent.main:main"
 
-[tool.setuptools]
-py-modules = [
-    "main",
-    "category_store",
-    "dedup_store",
-    "display",
-    "email_reader",
-    "excel_writer",
-    "gmail_reader",
-    "json_store",
-    "lookup_utils",
-    "merchant_store",
-    "merchant_utils",
-    "parser",
-    "splitter",
-]
+[tool.setuptools.packages.find]
+include = ["expense_agent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
 
 [build-system]
 requires = ["setuptools>=68.0"]

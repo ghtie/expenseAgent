@@ -84,5 +84,5 @@ def detect_source(email_text: str) -> str:
     Returns source name (e.g. "capitalone", "venmo") or "unknown".
     Delegates to the parser registry so new sources only need one edit.
     """
-    from parser import detect_source as _detect
+    from expense_agent.parser import detect_source as _detect
     return _detect(email_text)

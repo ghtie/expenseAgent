@@ -1,6 +1,6 @@
 """Tests for merchant_utils.py — shared merchant normalization."""
 
-from merchant_utils import normalize_merchant
+from expense_agent.utils.merchant_utils import normalize_merchant
 
 
 class TestNormalizeMerchant:

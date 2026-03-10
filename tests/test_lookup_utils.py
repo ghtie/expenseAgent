@@ -1,6 +1,6 @@
 """Tests for lookup_utils.py — shared fuzzy matching."""
 
-from lookup_utils import longest_substring_match
+from expense_agent.utils.lookup_utils import longest_substring_match
 
 
 class TestLongestSubstringMatch:

@@ -1,7 +1,7 @@
 """Local category lookup backed by a JSON file."""
 
-from json_store import load_json, save_json
-from lookup_utils import longest_substring_match
+from expense_agent.stores.json_store import load_json, save_json
+from expense_agent.utils.lookup_utils import longest_substring_match
 
 DEFAULT_PATH = "categories.json"
 
