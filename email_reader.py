@@ -81,18 +81,8 @@ def detect_source(email_text: str) -> str:
     """
     Detect the email provider from the email content.
 
-    Returns one of: "capitalone", "venmo", "unknown"
-
-    To add a new source:
-    1. Add a detection rule here
-    2. Add a prompt template in parser.SOURCE_PROMPTS
+    Returns source name (e.g. "capitalone", "venmo") or "unknown".
+    Delegates to the parser registry so new sources only need one edit.
     """
-    text_lower = email_text.lower()
-
-    if "capital one" in text_lower or "capitalone.com" in text_lower:
-        return "capitalone"
-
-    if "venmo" in text_lower or "venmo.com" in text_lower:
-        return "venmo"
-
-    return "unknown"
+    from parser import detect_source as _detect
+    return _detect(email_text)

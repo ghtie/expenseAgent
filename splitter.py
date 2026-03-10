@@ -56,8 +56,8 @@ def _parse_custom_split(input_str: str, full_amount: float) -> float:
             pct = float(input_str[:-1])
         except ValueError:
             raise ValueError(f"Invalid percentage: '{input_str}'. Example: 60%")
-        if not (0 < pct <= 100):
-            raise ValueError("Percentage must be between 0 and 100.")
+        if pct <= 0:
+            raise ValueError("Percentage must be greater than 0.")
         result = round(full_amount * (pct / 100), 2)
     else:
         try:
@@ -67,7 +67,5 @@ def _parse_custom_split(input_str: str, full_amount: float) -> float:
 
     if result <= 0:
         raise ValueError("Split amount must be greater than $0.00.")
-    if result > full_amount:
-        raise ValueError(f"Split amount ${result:.2f} exceeds the full amount ${full_amount:.2f}.")
 
     return result

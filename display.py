@@ -67,12 +67,25 @@ def prompt_action() -> str:
 
 
 def prompt_edit(transaction: dict) -> None:
-    """Prompt for item and category edits. Modifies transaction in place."""
+    """Prompt for item, category, and amount edits. Modifies transaction in place."""
     new_item = console.input(f"  Item [[dim]{transaction['item']}[/dim]]: ").strip()
     if new_item:
         transaction["item"] = new_item
 
     transaction["category"] = prompt_category(transaction["category"])
+
+    new_amount = console.input(
+        f"  Amount [[dim]${transaction['amount']:.2f}[/dim]]: "
+    ).strip().lstrip("$")
+    if new_amount:
+        try:
+            parsed = round(float(new_amount), 2)
+            if parsed > 0:
+                transaction["amount"] = parsed
+            else:
+                console.print("  [red]Amount must be greater than $0.00. Keeping original.[/red]")
+        except ValueError:
+            console.print("  [red]Invalid amount. Keeping original.[/red]")
 
 
 def prompt_category(current: str) -> str:
@@ -208,24 +221,33 @@ def prompt_batch_action(count: int) -> tuple[str, list[int] | None]:
         parts = raw.split(None, 1)
         cmd = parts[0]
 
-        if cmd in ("e", "edit") and len(parts) == 2:
-            indices = _parse_numbers(parts[1], count)
-            if indices:
-                return ("edit", indices)
+        if cmd in ("e", "edit"):
+            if len(parts) == 1 and count == 1:
+                return ("edit", [0])
+            if len(parts) == 2:
+                indices = _parse_numbers(parts[1], count)
+                if indices:
+                    return ("edit", indices)
             console.print(f"  [red]Enter number(s) 1-{count}[/red]")
             continue
 
-        if cmd in ("s", "split") and len(parts) == 2:
-            indices = _parse_numbers(parts[1], count)
-            if indices:
-                return ("split", indices)
+        if cmd in ("s", "split"):
+            if len(parts) == 1 and count == 1:
+                return ("split", [0])
+            if len(parts) == 2:
+                indices = _parse_numbers(parts[1], count)
+                if indices:
+                    return ("split", indices)
             console.print(f"  [red]Enter number(s) 1-{count}[/red]")
             continue
 
-        if cmd in ("sk", "skip") and len(parts) == 2:
-            indices = _parse_numbers(parts[1], count)
-            if indices:
-                return ("skip", indices)
+        if cmd in ("sk", "skip"):
+            if len(parts) == 1 and count == 1:
+                return ("skip", [0])
+            if len(parts) == 2:
+                indices = _parse_numbers(parts[1], count)
+                if indices:
+                    return ("skip", indices)
             console.print(f"  [red]Enter number(s) 1-{count}[/red]")
             continue
 

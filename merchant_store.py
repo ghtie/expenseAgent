@@ -1,25 +1,20 @@
 """Merchant auto-learn: maps raw merchant substrings to canonical name + category."""
 
-import json
-import os
-import re
+from json_store import load_json, save_json
+from lookup_utils import longest_substring_match
+from merchant_utils import normalize_merchant
 
 DEFAULT_PATH = "merchants.json"
 
 
 def load(path: str = DEFAULT_PATH) -> dict:
     """Read merchants.json. Returns {} if missing."""
-    if not os.path.exists(path):
-        return {}
-    with open(path) as f:
-        return json.load(f)
+    return load_json(path)
 
 
 def save(mapping: dict, path: str = DEFAULT_PATH) -> None:
     """Write merchants.json to disk."""
-    with open(path, "w") as f:
-        json.dump(mapping, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    save_json(mapping, path)
 
 
 def derive_key(raw_merchant: str) -> str:
@@ -30,21 +25,7 @@ def derive_key(raw_merchant: str) -> str:
     location suffixes so the key generalizes across branches.
     E.g. "TRADER JOE S #123" -> "trader joe"
     """
-    key = raw_merchant.strip().lower()
-    key = re.sub(r"\s+", " ", key)
-    # Strip payment processor prefixes
-    key = re.sub(r"^(sq|tst|pp)\s*\*\s*", "", key)
-    # Strip trailing #NNN store numbers
-    key = re.sub(r"\s*#\d+$", "", key)
-    # Strip trailing pure digit codes (3+ digits)
-    key = re.sub(r"\s+\d{3,}$", "", key)
-    # Strip trailing short codes like T- or T-1234
-    key = re.sub(r"\s+[a-z]{0,2}-?\d*$", "", key)
-    # Strip location suffixes like " - japan town"
-    key = re.sub(r"\s+-\s+\w[\w\s]*$", "", key)
-    # Strip trailing single character (truncated names like "joe s")
-    key = re.sub(r"\s+[a-z]$", "", key)
-    return key.strip()
+    return normalize_merchant(raw_merchant)
 
 
 def lookup(mapping: dict, raw_merchant: str) -> dict | None:
@@ -56,18 +37,7 @@ def lookup(mapping: dict, raw_merchant: str) -> dict | None:
     if not raw_merchant:
         return None
 
-    raw_lower = raw_merchant.lower()
-    best_key = None
-    best_len = 0
-
-    for key in mapping:
-        if len(key) < 3:
-            continue
-        if key in raw_lower:
-            if len(key) > best_len:
-                best_key = key
-                best_len = len(key)
-
+    best_key = longest_substring_match(raw_merchant.lower(), mapping, bidirectional=False)
     return mapping[best_key] if best_key else None
 
 

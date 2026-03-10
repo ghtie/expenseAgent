@@ -8,6 +8,8 @@ from the email text using known email formats.
 import re
 from datetime import datetime
 
+from merchant_utils import normalize_merchant
+
 
 class ParsingError(Exception):
     pass
@@ -70,24 +72,7 @@ def _parse_date(date_str: str) -> str:
 
 def _clean_merchant(raw: str) -> str:
     """Clean up a Capital One merchant name into a readable item name."""
-    cleaned = raw.strip()
-    # Collapse any whitespace/newlines into single spaces
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    # Strip "WWW." prefix and ".COM"/".NET"/etc suffix for URLs
-    cleaned = re.sub(r"^WWW\.", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\.(COM|NET|ORG)$", "", cleaned, flags=re.IGNORECASE)
-    # Strip payment processor prefixes (SQ *, TST *, PP*)
-    cleaned = re.sub(r"^(SQ|TST|PP)\s*\*\s*", "", cleaned, flags=re.IGNORECASE)
-    # Remove trailing store/location codes: #62, T-1234, T-, etc.
-    cleaned = re.sub(r"\s*#\d+$", "", cleaned)
-    cleaned = re.sub(r"\s+\d{3,}$", "", cleaned)
-    cleaned = re.sub(r"\s+[A-Z]{0,2}-?\d*$", "", cleaned, flags=re.IGNORECASE)
-    # Remove location suffixes like " - Japan Town"
-    cleaned = re.sub(r"\s+-\s+\w[\w\s]*$", "", cleaned)
-    # Remove trailing single character (truncated names like "JOE S" from "JOE'S")
-    cleaned = re.sub(r"\s+[A-Za-z]$", "", cleaned)
-    # Title-case it
-    return cleaned.strip().title()
+    return normalize_merchant(raw).title()
 
 
 def parse_capitalone(email_text: str) -> dict:
@@ -144,13 +129,45 @@ def parse_venmo(email_text: str, subject: str) -> dict:
     }
 
 
+def _detect_capitalone(email_text: str) -> bool:
+    text_lower = email_text.lower()
+    return "capital one" in text_lower or "capitalone.com" in text_lower
+
+
+def _detect_venmo(email_text: str) -> bool:
+    text_lower = email_text.lower()
+    return "venmo" in text_lower or "venmo.com" in text_lower
+
+
+# Registry mapping source name → detect function and parse function.
+# To add a new email source, add an entry here — no other files need editing.
+PARSERS: dict[str, dict] = {
+    "capitalone": {
+        "detect": _detect_capitalone,
+        "parse": lambda text, subject: parse_capitalone(text),
+    },
+    "venmo": {
+        "detect": _detect_venmo,
+        "parse": lambda text, subject: parse_venmo(text, subject),
+    },
+}
+
+
+def detect_source(email_text: str) -> str:
+    """Detect the email provider from the email content. Returns source name or 'unknown'."""
+    for name, entry in PARSERS.items():
+        if entry["detect"](email_text):
+            return name
+    return "unknown"
+
+
 def parse_transaction(email_text: str, source: str, subject: str = "") -> dict:
     """
     Parse a transaction from email text using regex.
 
     Args:
         email_text: Plain text email body.
-        source: "capitalone" or "venmo".
+        source: Source name from detect_source() (e.g. "capitalone", "venmo").
         subject: Email subject line (needed for Venmo amount).
 
     Returns:
@@ -159,12 +176,10 @@ def parse_transaction(email_text: str, source: str, subject: str = "") -> dict:
     Raises:
         ParsingError: if the email doesn't match the expected format.
     """
-    if source == "capitalone":
-        return parse_capitalone(email_text)
-    if source == "venmo":
-        return parse_venmo(email_text, subject)
-
-    raise ParsingError(
-        f"Unknown email source: '{source}'. "
-        "Only Capital One and Venmo emails are supported."
-    )
+    entry = PARSERS.get(source)
+    if entry is None:
+        raise ParsingError(
+            f"Unknown email source: '{source}'. "
+            f"Supported sources: {', '.join(PARSERS.keys())}."
+        )
+    return entry["parse"](email_text, subject)

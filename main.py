@@ -85,7 +85,7 @@ def _parse_email(email_text: str, subject: str, categories: dict, merchants: dic
     if not email_text.strip():
         return None
 
-    source = email_reader.detect_source(email_text)
+    source = expense_parser.detect_source(email_text)
     if source == "unknown":
         return None
 
@@ -153,8 +153,12 @@ def run_undo(config: dict) -> None:
     display.show_compact(removed)
 
 
-def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
-    """Fetch unread emails from Gmail and process in batch mode."""
+def _fetch_and_parse(config, categories, merchants):
+    """Fetch emails from Gmail, filter duplicates, and parse into entries.
+
+    Returns (entries, processed_ids) where entries is a list of
+    {"msg_id", "transaction", "raw_merchant"} dicts.
+    """
     import gmail_reader
 
     display.print_info("Fetching unread emails from Gmail...")
@@ -167,15 +171,12 @@ def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
 
     if not emails:
         display.print_info("No unread emails found.")
-        return
+        return [], set()
 
-    # Load dedup tracking
     processed_ids = dedup_store.load()
-
     console.print(f"\n[bold]Found {len(emails)} unread email(s).[/bold]")
 
-    # Phase 1: Parse all emails into transactions
-    entries = []  # list of {"msg_id", "transaction", "raw_merchant"}
+    entries = []
     skipped_dedup = 0
     for msg_id, subject, email_text in emails:
         if dedup_store.is_processed(processed_ids, msg_id):
@@ -195,11 +196,16 @@ def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
     if skipped_dedup:
         display.print_info(f"Skipped {skipped_dedup} already-processed email(s).")
 
-    if not entries:
-        display.print_info("No new transactions found.")
-        return
+    return entries, processed_ids
 
-    # Phase 2: Batch interaction loop
+
+def _run_batch_loop(config, entries, categories, merchants, processed_ids):
+    """Run the interactive batch edit/split/skip/write loop.
+
+    Returns a list of status strings parallel to entries.
+    """
+    import gmail_reader
+
     transactions = [e["transaction"] for e in entries]
     statuses = ["pending"] * len(entries)
 
@@ -253,7 +259,11 @@ def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
                 transactions[idx]["amount"] = splitter.prompt_split(transactions[idx]["amount"])
             display.show_batch_table(transactions, statuses)
 
-    # Final summary
+    return statuses
+
+
+def _print_summary(transactions, statuses):
+    """Display the final batch table with totals."""
     written_count = statuses.count("written")
     skipped_count = statuses.count("skipped")
     error_count = statuses.count("error")
@@ -273,6 +283,18 @@ def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
         f"\n[bold green]Done: {', '.join(parts)}. "
         f"Total: ${total_amount:.2f}[/bold green]\n"
     )
+
+
+def run_gmail(config: dict, categories: dict, merchants: dict) -> None:
+    """Fetch unread emails from Gmail and process in batch mode."""
+    entries, processed_ids = _fetch_and_parse(config, categories, merchants)
+
+    if not entries:
+        return
+
+    statuses = _run_batch_loop(config, entries, categories, merchants, processed_ids)
+    transactions = [e["transaction"] for e in entries]
+    _print_summary(transactions, statuses)
 
 
 def main() -> None:

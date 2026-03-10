@@ -1,24 +1,18 @@
 """Track processed Gmail message IDs to prevent duplicate writes."""
 
-import json
-import os
+from json_store import load_json, save_json
 
 DEFAULT_PATH = "processed.json"
 
 
 def load(path: str = DEFAULT_PATH) -> set:
     """Load processed message IDs. Returns empty set if missing."""
-    if not os.path.exists(path):
-        return set()
-    with open(path) as f:
-        return set(json.load(f))
+    return set(load_json(path, default_factory=list))
 
 
 def save(ids: set, path: str = DEFAULT_PATH) -> None:
     """Write processed message IDs to disk."""
-    with open(path, "w") as f:
-        json.dump(sorted(ids), f, indent=2)
-        f.write("\n")
+    save_json(sorted(ids), path)
 
 
 def is_processed(ids: set, msg_id: str) -> bool:
