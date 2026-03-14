@@ -39,9 +39,14 @@ _CAPITALONE_FALLBACK = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Venmo format (subject line):
-# "Jeffrey He paid your $10.31 request"
-_VENMO_SUBJECT_AMOUNT = re.compile(
+# Venmo subject amount patterns:
+# Outgoing: "You paid Jeffrey He $343.50"
+# Incoming (kept as fallback): "Jeffrey He paid your $10.31 request"
+_VENMO_SUBJECT_OUTGOING = re.compile(
+    r"You paid .+\$(?P<amount>[\d,]+\.\d{2})",
+    re.IGNORECASE,
+)
+_VENMO_SUBJECT_INCOMING = re.compile(
     r"paid your \$(?P<amount>[\d,]+\.\d{2}) request",
     re.IGNORECASE,
 )
@@ -52,11 +57,12 @@ _VENMO_DATE = re.compile(
     r"Date\s+(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4})",
 )
 
-# Venmo note — appears between "paid you" amount and "See transaction"
-# In plain text: "{Name} paid you\n$10.31\n{note}\nSee transaction"
+# Venmo note — the non-empty, non-dollar line right before "See transaction"
+# Works for both incoming and outgoing:
+#   "...$10.31\nDinner split\nSee transaction details"
+#   "...$ 343 . 50\nGoogle web pass\nSee transaction"
 _VENMO_NOTE = re.compile(
-    r"paid you\s+\$[\d,.]+\s+(?P<note>.+?)\s+See transaction",
-    re.DOTALL,
+    r"\n(?P<note>[^$\n][^\n]+)\n\s*See transaction",
 )
 
 
@@ -100,13 +106,16 @@ def parse_capitalone(email_text: str) -> dict:
 
 
 def parse_venmo(email_text: str, subject: str) -> dict:
-    """Extract transaction from a Venmo payment email."""
-    # Amount from subject line (most reliable)
-    amount_match = _VENMO_SUBJECT_AMOUNT.search(subject)
+    """Extract transaction from a Venmo payment email (incoming or outgoing)."""
+    # Amount from subject line (most reliable — body amount may lose decimal from HTML)
+    amount_match = _VENMO_SUBJECT_OUTGOING.search(subject)
+    if not amount_match:
+        amount_match = _VENMO_SUBJECT_INCOMING.search(subject)
     if not amount_match:
         raise ParsingError(
             "Could not parse Venmo amount from subject. "
-            f"Expected format: '... paid your $X.XX request'. Got: '{subject}'"
+            "Expected: '... paid your $X.XX request' or 'You paid Name $X.XX'. "
+            f"Got: '{subject}'"
         )
     amount = float(amount_match.group("amount").replace(",", ""))
 

@@ -7,6 +7,7 @@ On first run, opens a browser for OAuth consent and saves token.json for reuse.
 
 import base64
 import os
+import re
 from email import message_from_bytes
 
 from google.auth.transport.requests import Request
@@ -51,30 +52,60 @@ def _get_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def _extract_plain_text(payload: dict) -> str:
-    """Recursively extract the plain-text body from a Gmail message payload."""
+def _strip_html(html: str) -> str:
+    """Convert HTML to plain text by stripping tags and decoding entities."""
+    # Remove <style> and <script> blocks entirely (content + tags)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    # Replace <br>, <p>, <div>, <tr> tags with newlines
+    text = re.sub(r"<(?:br|p|div|tr)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    # Strip all remaining HTML tags
+    text = re.sub(r"<[^>]+>", " ", text)
+    # Decode common HTML entities
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("&nbsp;", " ").replace("&#39;", "'").replace("&quot;", '"')
+    # Collapse whitespace (but preserve newlines)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    # Collapse multiple blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _extract_body(payload: dict, mime_type_target: str) -> str:
+    """Recursively extract body text for a given MIME type from a Gmail payload."""
     mime_type = payload.get("mimeType", "")
 
-    # Simple single-part message
-    if mime_type == "text/plain":
+    if mime_type == mime_type_target:
         data = payload.get("body", {}).get("data", "")
         if data:
             return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
         return ""
 
-    # Multipart — recurse into parts
     parts = payload.get("parts", [])
     for part in parts:
-        if part.get("mimeType") == "text/plain":
+        if part.get("mimeType") == mime_type_target:
             data = part.get("body", {}).get("data", "")
             if data:
                 return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
 
-    # If no text/plain found, try the first nested multipart
     for part in parts:
-        text = _extract_plain_text(part)
+        text = _extract_body(part, mime_type_target)
         if text:
             return text
+
+    return ""
+
+
+def _extract_plain_text(payload: dict) -> str:
+    """Extract plain text from a Gmail message payload, falling back to HTML."""
+    text = _extract_body(payload, "text/plain")
+    if text:
+        return text
+
+    # Fall back to HTML (e.g. Venmo sends HTML-only emails)
+    html = _extract_body(payload, "text/html")
+    if html:
+        return _strip_html(html)
 
     return ""
 
@@ -87,7 +118,12 @@ def _extract_subject(headers: list[dict]) -> str:
     return ""
 
 
-DEFAULT_GMAIL_QUERY = "is:unread from:(notification.capitalone.com OR venmo.com)"
+DEFAULT_GMAIL_QUERY = (
+    "is:unread ("
+    "from:notification.capitalone.com OR "
+    "(from:venmo.com subject:\"You paid\")"
+    ")"
+)
 
 
 def fetch_unread_emails(query: str = DEFAULT_GMAIL_QUERY) -> list[tuple[str, str, str]]:

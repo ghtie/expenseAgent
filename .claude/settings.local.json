@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Bash(pip3 list:*)"
+      "Bash(pip3 list:*)",
+      "Bash(python:*)",
+      "Bash(grep:*)",
+      "Bash(/tmp/check_modules.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(pip install:*)",
+      "Bash(mkdir:*)",
+      "Bash(sed:*)"
     ]
   }
 }

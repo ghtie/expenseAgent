@@ -175,6 +175,34 @@ class TestParseVenmo:
         result = parse_venmo(body, subject)
         assert result["amount"] == 1000.00
 
+    def test_outgoing_payment(self):
+        """'You paid Name $X.XX' outgoing Venmo emails should parse."""
+        subject = "You paid Jeffrey He $343.50"
+        body = (
+            "You paid Jeffrey He\n"
+            "$34350\n"
+            "Google web pass\n"
+            "See transaction\n"
+            "Date\n"
+            "Mar 13, 2026\n"
+        )
+        result = parse_venmo(body, subject)
+        assert result["amount"] == 343.50
+        assert result["date"] == "03/13/2026"
+        assert result["item"] == "Google web pass"
+
+    def test_outgoing_payment_no_note(self):
+        subject = "You paid Jeffrey He $50.00"
+        body = (
+            "You paid Jeffrey He\n"
+            "$5000\n"
+            "Date\n"
+            "Mar 13, 2026\n"
+        )
+        result = parse_venmo(body, subject)
+        assert result["amount"] == 50.00
+        assert result["item"] == "Venmo Payment"
+
 
 # ---------- parse_transaction ----------
 

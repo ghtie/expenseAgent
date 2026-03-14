@@ -214,6 +214,10 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
 
         action, indices = display.prompt_batch_action(len(entries))
 
+        if action == "quit":
+            display.print_info("Quit — no remaining items were written.")
+            break
+
         if action == "all":
             for i in pending:
                 ok = _write_transaction(

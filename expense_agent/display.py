@@ -205,18 +205,21 @@ def prompt_batch_action(count: int) -> tuple[str, list[int] | None]:
     Prompt for batch-level action.
 
     Returns (action, indices) where action is one of:
-    "all", "edit", "skip", "split"
-    and indices is a list of 0-based indices (or None for "all").
+    "all", "edit", "skip", "split", "quit"
+    and indices is a list of 0-based indices (or None for "all"/"quit").
     Supports multiple numbers: "sk 7 8 9", "sk 7,8,9", "e 2, 5".
     """
     while True:
         raw = console.input(
             "\n  [bold]\\[a]ll write[/bold] / \\[e]dit # / \\[s]plit # / "
-            "\\[sk]ip # [bold]\\[default: a][/bold]: "
+            "\\[sk]ip # / \\[q]uit [bold]\\[default: a][/bold]: "
         ).strip().lower()
 
         if raw in ("", "a", "all"):
             return ("all", None)
+
+        if raw in ("q", "quit"):
+            return ("quit", None)
 
         parts = raw.split(None, 1)
         cmd = parts[0]
@@ -251,4 +254,4 @@ def prompt_batch_action(count: int) -> tuple[str, list[int] | None]:
             console.print(f"  [red]Enter number(s) 1-{count}[/red]")
             continue
 
-        console.print("  [red]Enter: a, e #, s #, or sk #[/red]")
+        console.print("  [red]Enter: a, e #, s #, sk #, or q[/red]")
