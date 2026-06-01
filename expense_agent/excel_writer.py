@@ -8,51 +8,16 @@ class ExcelError(Exception):
     pass
 
 
-def read_all_categories(config: dict) -> dict:
-    """
-    Read all rows from the Excel sheet and return an item→category mapping.
+def _open_workbook(config, read_only=False):
+    """Open the configured workbook and return (wb, ws, excel_path).
 
-    Used by the --seed command to bootstrap categories.json.
-    Returns an empty dict if the file/sheet is missing or empty.
+    Raises ExcelError if the file or sheet cannot be found/opened.
     """
     excel_path = config["excel_path"]
     sheet_name = config["sheet_name"]
 
     try:
-        wb = openpyxl.load_workbook(excel_path, read_only=True)
-    except (FileNotFoundError, PermissionError):
-        return {}
-
-    if sheet_name not in wb.sheetnames:
-        wb.close()
-        return {}
-
-    ws = wb[sheet_name]
-    rows = list(ws.iter_rows(min_col=5, max_col=6, values_only=True))
-    wb.close()
-
-    mapping = {}
-    for category, item in rows:
-        if item and category:
-            mapping[str(item)] = str(category)
-
-    return mapping
-
-
-def append_row(config: dict, transaction: dict) -> None:
-    """
-    Append a transaction row to the configured Excel sheet.
-
-    Columns written: Year (A), Month (B), Date (C), Amount (D), Category (E), Item (F)
-
-    Raises:
-        ExcelError: if the file or sheet cannot be found/written.
-    """
-    excel_path = config["excel_path"]
-    sheet_name = config["sheet_name"]
-
-    try:
-        wb = openpyxl.load_workbook(excel_path)
+        wb = openpyxl.load_workbook(excel_path, read_only=read_only)
     except FileNotFoundError:
         raise ExcelError(
             f"Excel file not found at: {excel_path}\n"
@@ -65,14 +30,60 @@ def append_row(config: dict, transaction: dict) -> None:
         )
 
     if sheet_name not in wb.sheetnames:
-        available = ", ".join(f'"{s}"' for s in wb.sheetnames)
+        wb.close()
         raise ExcelError(
             f"Sheet \"{sheet_name}\" not found in the workbook.\n"
-            f"Available sheets: {available}\n"
-            "Check the 'sheet_name' value in config.json."
+            f"Available sheets: {', '.join(wb.sheetnames)}"
         )
 
-    ws = wb[sheet_name]
+    return wb, wb[sheet_name], excel_path
+
+
+def _save_workbook(wb, excel_path):
+    """Save the workbook, raising ExcelError on permission issues."""
+    try:
+        wb.save(excel_path)
+    except PermissionError:
+        raise ExcelError(
+            f"Cannot save the Excel file — it may be open in another application.\n"
+            f"Close {excel_path} and try again."
+        )
+
+
+def read_all_categories(config: dict) -> dict:
+    """
+    Read all rows from the Excel sheet and return an item→subcategory mapping.
+
+    Used by the --seed command to bootstrap categories.json.
+    Returns an empty dict if the file/sheet is missing or empty.
+    """
+    try:
+        wb, ws, _ = _open_workbook(config, read_only=True)
+    except ExcelError:
+        return {}
+
+    rows = list(ws.iter_rows(min_col=6, max_col=7, values_only=True))
+    wb.close()
+
+    mapping = {}
+    for subcategory, item in rows:
+        if item and subcategory:
+            mapping[str(item)] = str(subcategory)
+
+    return mapping
+
+
+def append_row(config: dict, transaction: dict) -> None:
+    """
+    Append a transaction row to the configured Excel sheet.
+
+    Columns written: Year (A), Month (B), Date (C), Amount (D),
+                     Category (E), Subcategory (F), Item (G)
+
+    Raises:
+        ExcelError: if the file or sheet cannot be found/written.
+    """
+    wb, ws, excel_path = _open_workbook(config)
     next_row = ws.max_row + 1
 
     # Parse date to extract year and month
@@ -93,18 +104,14 @@ def append_row(config: dict, transaction: dict) -> None:
     amt_cell = ws.cell(row=next_row, column=4, value=transaction["amount"])  # D: Amount
     amt_cell.number_format = AMOUNT_FMT
     amt_cell.alignment = CENTER
-    cat_cell = ws.cell(row=next_row, column=5, value=transaction["category"])  # E: Category
+    cat_cell = ws.cell(row=next_row, column=5, value=transaction["category"])      # E: Category
     cat_cell.alignment = RIGHT
-    item_cell = ws.cell(row=next_row, column=6, value=transaction["item"])     # F: Item
+    subcat_cell = ws.cell(row=next_row, column=6, value=transaction["subcategory"])  # F: Subcategory
+    subcat_cell.alignment = RIGHT
+    item_cell = ws.cell(row=next_row, column=7, value=transaction["item"])          # G: Item
     item_cell.alignment = RIGHT
 
-    try:
-        wb.save(excel_path)
-    except PermissionError:
-        raise ExcelError(
-            f"Cannot save the Excel file — it may be open in another application.\n"
-            f"Close {excel_path} and try again."
-        )
+    _save_workbook(wb, excel_path)
 
 
 def remove_last_row(config: dict) -> dict | None:
@@ -116,23 +123,7 @@ def remove_last_row(config: dict) -> dict | None:
     Raises:
         ExcelError: if the file or sheet cannot be found/written.
     """
-    excel_path = config["excel_path"]
-    sheet_name = config["sheet_name"]
-
-    try:
-        wb = openpyxl.load_workbook(excel_path)
-    except FileNotFoundError:
-        raise ExcelError(f"Excel file not found at: {excel_path}")
-    except PermissionError:
-        raise ExcelError(
-            f"Cannot open the Excel file — it may be open in another application.\n"
-            f"Close {excel_path} and try again."
-        )
-
-    if sheet_name not in wb.sheetnames:
-        raise ExcelError(f"Sheet \"{sheet_name}\" not found in the workbook.")
-
-    ws = wb[sheet_name]
+    wb, ws, excel_path = _open_workbook(config)
     last_row = ws.max_row
 
     if last_row < 2:
@@ -143,7 +134,8 @@ def remove_last_row(config: dict) -> dict | None:
     date_val = ws.cell(row=last_row, column=3).value
     amount = ws.cell(row=last_row, column=4).value
     category = ws.cell(row=last_row, column=5).value
-    item = ws.cell(row=last_row, column=6).value
+    subcategory = ws.cell(row=last_row, column=6).value
+    item = ws.cell(row=last_row, column=7).value
 
     date_str = ""
     if isinstance(date_val, datetime):
@@ -152,18 +144,12 @@ def remove_last_row(config: dict) -> dict | None:
         date_str = str(date_val)
 
     ws.delete_rows(last_row)
-
-    try:
-        wb.save(excel_path)
-    except PermissionError:
-        raise ExcelError(
-            f"Cannot save the Excel file — it may be open in another application.\n"
-            f"Close {excel_path} and try again."
-        )
+    _save_workbook(wb, excel_path)
 
     return {
         "date": date_str,
         "item": str(item) if item else "",
         "category": str(category) if category else "",
+        "subcategory": str(subcategory) if subcategory else "",
         "amount": float(amount) if amount else 0.0,
     }

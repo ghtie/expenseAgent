@@ -34,6 +34,7 @@ expense --undo       # remove last written row
 expense_agent/           # main package
   main.py                # entry point, dispatches to run_gmail/seed_categories/run_undo
   parser.py              # PARSERS registry, regex extractors
+  categories.py          # SUBCATEGORIES, SUBCATEGORY_TO_CATEGORY, derive_category
   display.py             # Rich console, interactive prompts, batch table
   splitter.py            # split transaction amounts
   email_reader.py        # read from file/paste, detect_source delegation
@@ -55,7 +56,7 @@ expense_agent/           # main package
 1. `gmail_reader` fetches unread emails via Gmail API
 2. `parser.detect_source()` identifies email type via the `PARSERS` registry
 3. `parser.parse_transaction()` dispatches to `parse_capitalone()` or `parse_venmo()` regex extractors
-4. `stores/merchant_store` / `stores/category_store` auto-resolve item names and categories
+4. `stores/merchant_store` / `stores/category_store` auto-resolve item names and subcategories; `categories.derive_category()` maps subcategory → parent category
 5. `display` renders Rich tables and handles interactive edit/split/skip/write prompts
 6. `excel_writer` appends confirmed rows to the .xlsx file
 7. `stores/dedup_store` tracks processed Gmail message IDs to prevent re-processing
@@ -72,10 +73,11 @@ expense_agent/           # main package
 ## Key Conventions
 
 - All code lives in the `expense_agent` package with `stores/` and `utils/` sub-packages. All imports use absolute paths (e.g. `from expense_agent.stores import category_store`).
-- Transactions are plain dicts with keys: `date` (MM/DD/YYYY string), `item`, `category`, `amount` (float). `_raw_merchant` is internal metadata stripped before display.
+- Transactions are plain dicts with keys: `date` (MM/DD/YYYY string), `item`, `category` (broad, e.g. "Food & Dining"), `subcategory` (specific, e.g. "Groceries"), `amount` (float). `_raw_merchant` is internal metadata stripped before display. The parent `category` is auto-derived from `subcategory` via `categories.SUBCATEGORY_TO_CATEGORY`.
 - JSON data files (`categories.json`, `merchants.json`, `processed.json`) live in the project root alongside code. They are runtime data, not checked into git.
 - `config.json` holds `excel_path` and `sheet_name`. `credentials.json` and `token.json` are for Gmail OAuth.
 - Tests use `conftest.py` fixtures (`sample_capitalone_email`, `sample_venmo_subject`, `sample_venmo_body`, `config`, `sample_categories`, `sample_merchants`).
+- `categories.py` owns domain constants (`SUBCATEGORIES`, `SUBCATEGORY_TO_CATEGORY`) and `derive_category()`. `display.py` and `main.py` import from it.
 - `display.py` owns the shared `Console` instance. `splitter.py` imports it as `from expense_agent.display import console`.
-- Excel columns: Year (A), Month (B), Date (C), Amount (D), Category (E), Item (F).
+- Excel columns: Year (A), Month (B), Date (C), Amount (D), Category (E), Subcategory (F), Item (G).
 - The splitter allows amounts exceeding the original and percentages over 100%.

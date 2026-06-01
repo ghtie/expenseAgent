@@ -31,22 +31,29 @@ def derive_key(raw_merchant: str) -> str:
 def lookup(mapping: dict, raw_merchant: str) -> dict | None:
     """
     Case-insensitive substring match against raw merchant string.
-    Returns {"name": "...", "category": "..."} or None.
+    Returns {"name": "...", "subcategory": "..."} or None.
     Longest match wins to avoid false positives.
+    Handles legacy entries that use "category" instead of "subcategory".
     """
     if not raw_merchant:
         return None
 
     best_key = longest_substring_match(raw_merchant.lower(), mapping, bidirectional=False)
-    return mapping[best_key] if best_key else None
+    if not best_key:
+        return None
+    entry = mapping[best_key]
+    # Handle legacy format: {"name": "...", "category": "..."}
+    if "subcategory" not in entry and "category" in entry:
+        return {"name": entry["name"], "subcategory": entry["category"]}
+    return entry
 
 
-def learn(mapping: dict, raw_merchant: str, name: str, category: str) -> None:
+def learn(mapping: dict, raw_merchant: str, name: str, subcategory: str) -> None:
     """Add or update a merchant mapping and save to disk."""
     if not raw_merchant:
         return
     key = derive_key(raw_merchant)
     if not key:
         return
-    mapping[key] = {"name": name, "category": category}
+    mapping[key] = {"name": name, "subcategory": subcategory}
     save(mapping)

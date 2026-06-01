@@ -11,7 +11,8 @@ from expense_agent.excel_writer import append_row, remove_last_row, read_all_cat
 
 class TestAppendRow:
     def _make_txn(self, **overrides):
-        txn = {"date": "02/21/2026", "item": "Test Store", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test Store", "category": "Misc",
+               "subcategory": "Misc", "amount": 5.25}
         txn.update(overrides)
         return txn
 
@@ -24,7 +25,8 @@ class TestAppendRow:
         assert ws.cell(row=2, column=2).value == "Feb"       # Month
         assert ws.cell(row=2, column=4).value == 5.25        # Amount
         assert ws.cell(row=2, column=5).value == "Misc"      # Category
-        assert ws.cell(row=2, column=6).value == "Test Store" # Item
+        assert ws.cell(row=2, column=6).value == "Misc"      # Subcategory
+        assert ws.cell(row=2, column=7).value == "Test Store" # Item
         wb.close()
 
     def test_multiple_rows(self, config):
@@ -32,8 +34,8 @@ class TestAppendRow:
         append_row(config, self._make_txn(item="Store B"))
         wb = openpyxl.load_workbook(config["excel_path"])
         ws = wb["Daily Expenses"]
-        assert ws.cell(row=2, column=6).value == "Store A"
-        assert ws.cell(row=3, column=6).value == "Store B"
+        assert ws.cell(row=2, column=7).value == "Store A"
+        assert ws.cell(row=3, column=7).value == "Store B"
         wb.close()
 
     def test_file_not_found_raises(self, tmp_path):
@@ -61,22 +63,22 @@ class TestAppendRow:
 
 class TestRemoveLastRow:
     def test_returns_transaction(self, config):
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc",
+               "subcategory": "Misc", "amount": 5.25}
         append_row(config, txn)
         removed = remove_last_row(config)
         assert removed is not None
         assert removed["item"] == "Test"
+        assert removed["subcategory"] == "Misc"
         assert removed["amount"] == 5.25
 
     def test_empty_returns_none(self, config):
-        # Only header row exists (row 1), so max_row < 2 won't trigger
-        # but fixture has a header row, so max_row=1 — remove should return None
-        # Actually, fixture appends a header, so max_row = 1
         result = remove_last_row(config)
         assert result is None
 
     def test_actually_deletes(self, config):
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc",
+               "subcategory": "Misc", "amount": 5.25}
         append_row(config, txn)
         remove_last_row(config)
         wb = openpyxl.load_workbook(config["excel_path"])
@@ -94,10 +96,11 @@ class TestRemoveLastRow:
 
 class TestReadAllCategories:
     def test_returns_mapping(self, config):
-        txn = {"date": "02/21/2026", "item": "Coffee Shop", "category": "Food & Dining", "amount": 4.50}
+        txn = {"date": "02/21/2026", "item": "Coffee Shop", "category": "Food & Dining",
+               "subcategory": "Dining", "amount": 4.50}
         append_row(config, txn)
         mapping = read_all_categories(config)
-        assert mapping["Coffee Shop"] == "Food & Dining"
+        assert mapping["Coffee Shop"] == "Dining"
 
     def test_missing_file(self, tmp_path):
         cfg = {"excel_path": str(tmp_path / "nope.xlsx"), "sheet_name": "Sheet1"}
@@ -108,16 +111,16 @@ class TestReadAllCategories:
         assert read_all_categories(config) == {}
 
     def test_skips_empty_cells(self, tmp_path):
-        # Create a workbook with no header data in cols 5-6
+        # Create a workbook with no header data in cols 6-7
         excel_path = tmp_path / "test.xlsx"
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Daily Expenses"
-        # Row 1: header with no category/item
+        # Row 1: header with no subcategory/item
         ws.cell(row=1, column=1, value="Year")
         # Row 2: data row with item cleared
-        ws.cell(row=2, column=5, value="Misc")
-        ws.cell(row=2, column=6, value=None)
+        ws.cell(row=2, column=6, value="Misc")
+        ws.cell(row=2, column=7, value=None)
         wb.save(excel_path)
         wb.close()
         cfg = {"excel_path": str(excel_path), "sheet_name": "Daily Expenses"}

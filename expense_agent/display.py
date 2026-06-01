@@ -1,35 +1,9 @@
 from rich.console import Console
 from rich.table import Table
 
-console = Console()
+from expense_agent.categories import SUBCATEGORIES, derive_category
 
-CATEGORIES = [
-    "Apartment Necessities",
-    "Clothing & Shoes",
-    "Education",
-    "Electricity",
-    "Entertainment",
-    "Essentials",
-    "Food & Dining",
-    "Gift",
-    "Groceries",
-    "Health",
-    "Hobbies",
-    "Misc",
-    "Phone",
-    "School",
-    "Skincare & Makeup",
-    "Special Events",
-    "Subscriptions",
-    "Transportation",
-    "Travel - Flight",
-    "Travel - Food & Dining",
-    "Travel - Hotel",
-    "Travel - Misc",
-    "Travel - Special Events",
-    "Travel - Transportation",
-    "Utilities",
-]
+console = Console()
 
 
 def show_compact(transaction: dict) -> None:
@@ -37,6 +11,7 @@ def show_compact(transaction: dict) -> None:
     console.print(
         f"  [dim]Date:[/dim] {transaction['date']}  "
         f"[dim]Category:[/dim] {transaction['category']}  "
+        f"[dim]Subcategory:[/dim] {transaction['subcategory']}  "
         f"[dim]Item:[/dim] {transaction['item']}  "
         f"[dim]Amount:[/dim] [green]${transaction['amount']:.2f}[/green]"
     )
@@ -67,12 +42,13 @@ def prompt_action() -> str:
 
 
 def prompt_edit(transaction: dict) -> None:
-    """Prompt for item, category, and amount edits. Modifies transaction in place."""
+    """Prompt for item, subcategory, and amount edits. Modifies transaction in place."""
     new_item = console.input(f"  Item [[dim]{transaction['item']}[/dim]]: ").strip()
     if new_item:
         transaction["item"] = new_item
 
-    transaction["category"] = prompt_category(transaction["category"])
+    transaction["subcategory"] = prompt_subcategory(transaction["subcategory"])
+    transaction["category"] = derive_category(transaction["subcategory"])
 
     new_amount = console.input(
         f"  Amount [[dim]${transaction['amount']:.2f}[/dim]]: "
@@ -88,14 +64,14 @@ def prompt_edit(transaction: dict) -> None:
             console.print("  [red]Invalid amount. Keeping original.[/red]")
 
 
-def prompt_category(current: str) -> str:
-    """Show a numbered category picker with search. Returns the selected category."""
+def prompt_subcategory(current: str) -> str:
+    """Show a numbered subcategory picker with search. Returns the selected subcategory."""
     console.print(f"  [dim]Current: {current}[/dim]")
 
     def _show_grid():
         per_row = 3
-        for i in range(0, len(CATEGORIES), per_row):
-            chunk = CATEGORIES[i:i + per_row]
+        for i in range(0, len(SUBCATEGORIES), per_row):
+            chunk = SUBCATEGORIES[i:i + per_row]
             parts = [f"[bold]{i + j + 1:>2}[/bold]) {cat:<25}" for j, cat in enumerate(chunk)]
             console.print("  " + " ".join(parts))
 
@@ -103,7 +79,7 @@ def prompt_category(current: str) -> str:
 
     while True:
         choice = console.input(
-            "  Category # or name [[bold]Enter to keep[/bold]]: "
+            "  Subcategory # or name [[bold]Enter to keep[/bold]]: "
         ).strip()
 
         if choice == "":
@@ -112,14 +88,14 @@ def prompt_category(current: str) -> str:
         # Try number first
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(CATEGORIES):
-                return CATEGORIES[idx]
+            if 0 <= idx < len(SUBCATEGORIES):
+                return SUBCATEGORIES[idx]
         except ValueError:
             pass
 
         # Fuzzy text search
         query = choice.lower()
-        matches = [c for c in CATEGORIES if query in c.lower()]
+        matches = [c for c in SUBCATEGORIES if query in c.lower()]
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
@@ -128,7 +104,7 @@ def prompt_category(current: str) -> str:
                 console.print(f"    {m}")
             continue
 
-        console.print(f"  [red]No match. Enter 1-{len(CATEGORIES)}, search text, or Enter to keep[/red]")
+        console.print(f"  [red]No match. Enter 1-{len(SUBCATEGORIES)}, search text, or Enter to keep[/red]")
 
 
 def print_success(sheet_name: str, excel_path: str) -> None:
@@ -154,6 +130,7 @@ def show_batch_table(transactions: list[dict], statuses: list[str]) -> None:
     table.add_column("Date", width=10)
     table.add_column("Item", min_width=15)
     table.add_column("Category", min_width=12)
+    table.add_column("Subcategory", min_width=12)
     table.add_column("Amount", justify="right", width=10)
     table.add_column("", justify="center", width=2)
 
@@ -174,6 +151,7 @@ def show_batch_table(transactions: list[dict], statuses: list[str]) -> None:
             txn["date"],
             txn["item"],
             txn["category"],
+            txn["subcategory"],
             f"${txn['amount']:.2f}",
             indicator,
             style=style,
@@ -224,33 +202,20 @@ def prompt_batch_action(count: int) -> tuple[str, list[int] | None]:
         parts = raw.split(None, 1)
         cmd = parts[0]
 
-        if cmd in ("e", "edit"):
-            if len(parts) == 1 and count == 1:
-                return ("edit", [0])
-            if len(parts) == 2:
-                indices = _parse_numbers(parts[1], count)
-                if indices:
-                    return ("edit", indices)
-            console.print(f"  [red]Enter number(s) 1-{count}[/red]")
-            continue
+        _INDEXED_COMMANDS = {
+            "e": "edit", "edit": "edit",
+            "s": "split", "split": "split",
+            "sk": "skip", "skip": "skip",
+        }
 
-        if cmd in ("s", "split"):
+        action = _INDEXED_COMMANDS.get(cmd)
+        if action:
             if len(parts) == 1 and count == 1:
-                return ("split", [0])
+                return (action, [0])
             if len(parts) == 2:
                 indices = _parse_numbers(parts[1], count)
                 if indices:
-                    return ("split", indices)
-            console.print(f"  [red]Enter number(s) 1-{count}[/red]")
-            continue
-
-        if cmd in ("sk", "skip"):
-            if len(parts) == 1 and count == 1:
-                return ("skip", [0])
-            if len(parts) == 2:
-                indices = _parse_numbers(parts[1], count)
-                if indices:
-                    return ("skip", indices)
+                    return (action, indices)
             console.print(f"  [red]Enter number(s) 1-{count}[/red]")
             continue
 

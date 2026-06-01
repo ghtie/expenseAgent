@@ -19,7 +19,7 @@ class ParsingError(Exception):
 # "on February 21, 2026, at\nWWW.CSCSW.COM, a pending authorization or purchase
 #  in the amount of $5.25\nwas placed or charged on your ..."
 _CAPITALONE_PATTERN = re.compile(
-    r"on\s+(?P<date>[A-Z][a-z]+\s+\d{1,2},\s*\d{4}),\s*"
+    r"on\s+(?P<date>[A-Z][a-z]+\.?\s+\d{1,2},\s*\d{4}),\s*"
     r"at\s+(?P<merchant>.+?),\s*"
     r"a\s+pending\s+authorization\s+or\s+purchase\s+in\s+the\s+amount\s+of\s+"
     r"\$(?P<amount>[\d,]+\.\d{2})",
@@ -30,7 +30,7 @@ _CAPITALONE_PATTERN = re.compile(
 # Matches: "A purchase was charged..." or "A transaction was made..." style emails
 # Looks for any date, merchant after "at", and dollar amount nearby
 _CAPITALONE_FALLBACK = re.compile(
-    r"(?P<date>[A-Z][a-z]+\s+\d{1,2},\s*\d{4})"
+    r"(?P<date>[A-Z][a-z]+\.?\s+\d{1,2},\s*\d{4})"
     r".*?"
     r"at\s+(?P<merchant>.+?)"
     r",\s*(?:a\s+)?(?:purchase|transaction|charge|pending)"
@@ -67,10 +67,11 @@ _VENMO_NOTE = re.compile(
 
 
 def _parse_date(date_str: str) -> str:
-    """Convert a date string like 'February 19, 2026' or 'Feb 19, 2026' to MM/DD/YYYY."""
+    """Convert a date string like 'February 19, 2026' or 'Feb 19, 2026' or 'Apr. 25, 2026' to MM/DD/YYYY."""
+    cleaned = date_str.strip().replace(".", "")
     for fmt in ("%B %d, %Y", "%b %d, %Y"):
         try:
-            return datetime.strptime(date_str.strip(), fmt).strftime("%m/%d/%Y")
+            return datetime.strptime(cleaned, fmt).strftime("%m/%d/%Y")
         except ValueError:
             continue
     raise ParsingError(f"Could not parse date: '{date_str}'")
@@ -101,6 +102,7 @@ def parse_capitalone(email_text: str) -> dict:
         "item": _clean_merchant(match.group("merchant")),
         "amount": float(match.group("amount").replace(",", "")),
         "category": "Misc",
+        "subcategory": "Misc",
         "_raw_merchant": match.group("merchant"),
     }
 
@@ -134,6 +136,7 @@ def parse_venmo(email_text: str, subject: str) -> dict:
         "item": item,
         "amount": amount,
         "category": "Misc",
+        "subcategory": "Misc",
         "_raw_merchant": "",
     }
 

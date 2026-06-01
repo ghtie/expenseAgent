@@ -34,11 +34,12 @@ class TestLoadConfig:
 
 class TestParseEmail:
     def test_merchant_match(self, sample_capitalone_email, sample_categories, sample_merchants):
-        merchants = {"cscsw": {"name": "CSCSW Service", "category": "Subscriptions"}}
+        merchants = {"cscsw": {"name": "CSCSW Service", "subcategory": "Subscriptions"}}
         result = _parse_email(sample_capitalone_email, "", sample_categories, merchants)
         assert result is not None
         assert result["item"] == "CSCSW Service"
-        assert result["category"] == "Subscriptions"
+        assert result["subcategory"] == "Subscriptions"
+        assert result["category"] == "Subscriptions"  # derived from subcategory
 
     def test_category_fallback(self, sample_categories):
         email = (
@@ -51,7 +52,8 @@ class TestParseEmail:
         result = _parse_email(email, "", sample_categories, {})
         assert result is not None
         # "Trader Joe" should fuzzy-match "Trader Joes" in categories
-        assert result["category"] == "Groceries"
+        assert result["subcategory"] == "Groceries"
+        assert result["category"] == "Food & Dining"
 
     def test_no_match(self, sample_categories, sample_merchants):
         email = (
@@ -63,7 +65,7 @@ class TestParseEmail:
         )
         result = _parse_email(email, "", sample_categories, sample_merchants)
         assert result is not None
-        assert result["category"] == "Misc"
+        assert result["subcategory"] == "Misc"
 
     def test_unknown_source(self, sample_categories, sample_merchants):
         result = _parse_email("Hello from your bank", "", sample_categories, sample_merchants)
@@ -85,13 +87,13 @@ class TestWriteTransaction:
     def test_success(self, config, monkeypatch):
         monkeypatch.setattr("expense_agent.main.category_store.save", lambda *a: None)
         monkeypatch.setattr("expense_agent.main.merchant_store.learn", lambda *a: None)
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "subcategory": "Misc", "amount": 5.25}
         result = _write_transaction(config, txn, "RAW", {}, {})
         assert result is True
 
     def test_excel_error(self, tmp_path, monkeypatch):
         cfg = {"excel_path": str(tmp_path / "nope.xlsx"), "sheet_name": "Sheet1"}
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "subcategory": "Misc", "amount": 5.25}
         result = _write_transaction(cfg, txn, "", {}, {})
         assert result is False
 
@@ -100,16 +102,17 @@ class TestWriteTransaction:
         monkeypatch.setattr("expense_agent.main.category_store.save", lambda m, *a: saved.update(m))
         monkeypatch.setattr("expense_agent.main.merchant_store.learn", lambda *a: None)
         categories = {}
-        txn = {"date": "02/21/2026", "item": "Coffee", "category": "Food & Dining", "amount": 4.50}
+        txn = {"date": "02/21/2026", "item": "Coffee", "category": "Food & Dining",
+               "subcategory": "Dining", "amount": 4.50}
         _write_transaction(config, txn, "", categories, {})
-        assert categories["Coffee"] == "Food & Dining"
+        assert categories["Coffee"] == "Dining"
 
     def test_marks_processed(self, config, monkeypatch):
         monkeypatch.setattr("expense_agent.main.category_store.save", lambda *a: None)
         monkeypatch.setattr("expense_agent.main.merchant_store.learn", lambda *a: None)
         monkeypatch.setattr("expense_agent.main.dedup_store.mark_processed", lambda ids, mid: ids.add(mid))
         processed = set()
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "subcategory": "Misc", "amount": 5.25}
         _write_transaction(config, txn, "", {}, {}, processed, "msg123")
         assert "msg123" in processed
 
@@ -118,7 +121,7 @@ class TestWriteTransaction:
         monkeypatch.setattr("expense_agent.main.merchant_store.learn", lambda *a: None)
         mark_called = []
         monkeypatch.setattr("expense_agent.main.dedup_store.mark_processed", lambda *a: mark_called.append(1))
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "subcategory": "Misc", "amount": 5.25}
         _write_transaction(config, txn, "", {}, {}, set(), "")
         assert len(mark_called) == 0
 
@@ -128,7 +131,7 @@ class TestWriteTransaction:
 class TestRunUndo:
     def test_removes_row(self, config, monkeypatch):
         from expense_agent.excel_writer import append_row
-        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "amount": 5.25}
+        txn = {"date": "02/21/2026", "item": "Test", "category": "Misc", "subcategory": "Misc", "amount": 5.25}
         append_row(config, txn)
         # Should not raise or exit
         run_undo(config)

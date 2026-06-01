@@ -51,8 +51,8 @@ class TestLookup:
 
     def test_longest_wins(self):
         mapping = {
-            "joe": {"name": "Joe's", "category": "Wrong"},
-            "trader joe": {"name": "Trader Joes", "category": "Groceries"},
+            "joe": {"name": "Joe's", "subcategory": "Wrong"},
+            "trader joe": {"name": "Trader Joes", "subcategory": "Groceries"},
         }
         result = merchant_store.lookup(mapping, "TRADER JOE S #456")
         assert result["name"] == "Trader Joes"
@@ -64,7 +64,7 @@ class TestLookup:
         assert merchant_store.lookup(sample_merchants, "WHOLE FOODS") is None
 
     def test_skips_short_keys(self):
-        mapping = {"TJ": {"name": "TJ's", "category": "Misc"}}
+        mapping = {"TJ": {"name": "TJ's", "subcategory": "Misc"}}
         assert merchant_store.lookup(mapping, "TJ STORE") is None
 
 

@@ -41,7 +41,7 @@ def config(tmp_path):
     ws = wb.active
     ws.title = "Daily Expenses"
     # Add a header row so max_row starts at 1
-    ws.append(["Year", "Month", "Date", "Amount", "Category", "Item"])
+    ws.append(["Year", "Month", "Date", "Amount", "Category", "Subcategory", "Item"])
     wb.save(excel_path)
     return {
         "excel_path": str(excel_path),
@@ -61,5 +61,5 @@ def sample_categories():
 @pytest.fixture
 def sample_merchants():
     return {
-        "trader joe": {"name": "Trader Joes", "category": "Groceries"},
+        "trader joe": {"name": "Trader Joes", "subcategory": "Groceries"},
     }

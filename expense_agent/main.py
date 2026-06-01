@@ -8,34 +8,40 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
 
 from rich.console import Console
 
 from expense_agent.stores import category_store, dedup_store, merchant_store
+from expense_agent.stores.json_store import load_json
 from expense_agent import display, email_reader, excel_writer
 from expense_agent import parser as expense_parser
 from expense_agent import splitter
+from expense_agent.categories import derive_category
 
 console = Console()
+
+# Transaction processing statuses
+PENDING = "pending"
+WRITTEN = "written"
+SKIPPED = "skipped"
+ERROR = "error"
 
 # Resolve project root so `expense` works from any directory
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def load_config(path: str = "config.json") -> dict:
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except FileNotFoundError:
+    if not os.path.exists(path):
         display.print_error(
             f"config.json not found. Create it with 'excel_path' and 'sheet_name'.\n"
             "See config.json.example for the expected format."
         )
         sys.exit(1)
-    except json.JSONDecodeError as exc:
+    try:
+        return load_json(path)
+    except Exception as exc:
         display.print_error(f"config.json is not valid JSON: {exc}")
         sys.exit(1)
 
@@ -91,20 +97,21 @@ def _parse_email(email_text: str, subject: str, categories: dict, merchants: dic
         display.print_error(str(exc))
         return None
 
-    raw_merchant = txn.pop("_raw_merchant", "")
+    raw_merchant = txn.get("_raw_merchant", "")
 
-    # Merchant auto-learn lookup (provides both name + category)
+    # Merchant auto-learn lookup (provides both name + subcategory)
     merchant_match = merchant_store.lookup(merchants, raw_merchant)
     if merchant_match:
         txn["item"] = merchant_match["name"]
-        txn["category"] = merchant_match["category"]
+        txn["subcategory"] = merchant_match["subcategory"]
+        txn["category"] = derive_category(txn["subcategory"])
     else:
-        # Fall back to category-only lookup
-        stored_category = category_store.lookup(categories, txn["item"])
-        if stored_category:
-            txn["category"] = stored_category
+        # Fall back to category-only lookup (returns subcategory string)
+        stored_subcategory = category_store.lookup(categories, txn["item"])
+        if stored_subcategory:
+            txn["subcategory"] = stored_subcategory
+            txn["category"] = derive_category(txn["subcategory"])
 
-    txn["_raw_merchant"] = raw_merchant
     return txn
 
 
@@ -118,13 +125,13 @@ def _write_transaction(config: dict, txn: dict, raw_merchant: str,
         display.print_error(str(exc))
         return False
 
-    # Update categories.json
-    categories[txn["item"]] = txn["category"]
+    # Update categories.json (stores subcategory)
+    categories[txn["item"]] = txn["subcategory"]
     category_store.save(categories)
 
     # Update merchants.json
     if raw_merchant:
-        merchant_store.learn(merchants, raw_merchant, txn["item"], txn["category"])
+        merchant_store.learn(merchants, raw_merchant, txn["item"], txn["subcategory"])
 
     # Track as processed for dedup
     if processed_ids is not None and msg_id:
@@ -182,7 +189,7 @@ def _fetch_and_parse(config, categories, merchants):
         if txn is None:
             display.print_info(f"Could not parse email: {subject[:60]}")
             continue
-        raw_merchant = txn.pop("_raw_merchant", "")
+        raw_merchant = txn.pop("_raw_merchant", "")  # strip metadata before display
         entries.append({
             "msg_id": msg_id,
             "transaction": txn,
@@ -195,6 +202,14 @@ def _fetch_and_parse(config, categories, merchants):
     return entries, processed_ids
 
 
+def _is_actionable(statuses, idx):
+    """Check if an item can still be acted on (pending or error). Prints info if not."""
+    if statuses[idx] not in (PENDING, ERROR):
+        display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+        return False
+    return True
+
+
 def _run_batch_loop(config, entries, categories, merchants, processed_ids):
     """Run the interactive batch edit/split/skip/write loop.
 
@@ -203,12 +218,12 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
     from expense_agent import gmail_reader
 
     transactions = [e["transaction"] for e in entries]
-    statuses = ["pending"] * len(entries)
+    statuses = [PENDING] * len(entries)
 
     display.show_batch_table(transactions, statuses)
 
     while True:
-        pending = [i for i, s in enumerate(statuses) if s == "pending"]
+        pending = [i for i, s in enumerate(statuses) if s == PENDING]
         if not pending:
             break
 
@@ -225,24 +240,21 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
                     categories, merchants, processed_ids, entries[i]["msg_id"],
                 )
                 if ok:
-                    statuses[i] = "written"
+                    statuses[i] = WRITTEN
                     gmail_reader.mark_as_read(entries[i]["msg_id"])
                 else:
-                    statuses[i] = "error"
+                    statuses[i] = ERROR
             break
 
         elif action == "skip":
             for idx in indices:
-                if statuses[idx] not in ("pending", "error"):
-                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
-                else:
-                    statuses[idx] = "skipped"
+                if _is_actionable(statuses, idx):
+                    statuses[idx] = SKIPPED
             display.show_batch_table(transactions, statuses)
 
         elif action == "edit":
             for idx in indices:
-                if statuses[idx] not in ("pending", "error"):
-                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+                if not _is_actionable(statuses, idx):
                     continue
                 console.print(f"\n[bold cyan]── Editing #{idx + 1} ──[/bold cyan]")
                 display.show_compact(transactions[idx])
@@ -251,8 +263,7 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
 
         elif action == "split":
             for idx in indices:
-                if statuses[idx] not in ("pending", "error"):
-                    display.print_info(f"Item #{idx + 1} is already {statuses[idx]}.")
+                if not _is_actionable(statuses, idx):
                     continue
                 console.print(f"\n[bold cyan]── Splitting #{idx + 1} ──[/bold cyan]")
                 display.show_compact(transactions[idx])
@@ -264,9 +275,9 @@ def _run_batch_loop(config, entries, categories, merchants, processed_ids):
 
 def _print_summary(transactions, statuses):
     """Display the final batch table with totals."""
-    written_count = statuses.count("written")
-    skipped_count = statuses.count("skipped")
-    error_count = statuses.count("error")
+    written_count = statuses.count(WRITTEN)
+    skipped_count = statuses.count(SKIPPED)
+    error_count = statuses.count(ERROR)
 
     display.show_batch_table(transactions, statuses)
 
@@ -277,7 +288,7 @@ def _print_summary(transactions, statuses):
         parts.append(f"{error_count} failed")
 
     total_amount = sum(
-        t["amount"] for t, s in zip(transactions, statuses) if s == "written"
+        t["amount"] for t, s in zip(transactions, statuses) if s == WRITTEN
     )
     console.print(
         f"\n[bold green]Done: {', '.join(parts)}. "
