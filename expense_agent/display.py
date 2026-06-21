@@ -51,11 +51,15 @@ def prompt_edit(transaction: dict) -> None:
     transaction["category"] = derive_category(transaction["subcategory"])
 
     new_amount = console.input(
-        f"  Amount [[dim]${transaction['amount']:.2f}[/dim]]: "
-    ).strip().lstrip("$")
-    if new_amount:
+        f"  Amount [[dim]${transaction['amount']:.2f}[/dim]] (or [bold]s[/bold] to split): "
+    ).strip().lower()
+    if new_amount == "s":
+        from expense_agent.splitter import prompt_split
+        transaction["amount"] = prompt_split(transaction["amount"])
+    elif new_amount:
+        raw = new_amount.lstrip("$")
         try:
-            parsed = round(float(new_amount), 2)
+            parsed = round(float(raw), 2)
             if parsed > 0:
                 transaction["amount"] = parsed
             else:

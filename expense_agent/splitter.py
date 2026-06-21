@@ -11,18 +11,37 @@ def prompt_split(full_amount: float) -> float:
         choice = console.input(
             f"  [1] Full [green]${full_amount:.2f}[/green]  "
             f"[2] Half [green]${half:.2f}[/green]  "
-            f"[3] Custom "
-            f"[[bold]default: 1[/bold]]: "
+            f"[3] Equal split  "
+            f"[4] Custom "
+            f"[[bold]default: 2[/bold]]: "
         ).strip()
 
-        if choice in ("", "1"):
+        if choice == "1":
             return full_amount
-        if choice == "2":
+        if choice in ("", "2"):
             return half
         if choice == "3":
+            return _prompt_equal_split(full_amount)
+        if choice == "4":
             return _prompt_custom_split(full_amount)
 
-        console.print("  [red]Enter 1, 2, or 3.[/red]")
+        console.print("  [red]Enter 1, 2, 3, or 4.[/red]")
+
+
+def _prompt_equal_split(full_amount: float) -> float:
+    """Prompt for number of people and return an equal share."""
+    while True:
+        raw = console.input("  Split among how many people? ").strip()
+        try:
+            n = int(raw)
+            if n < 2:
+                console.print("  [red]Must be at least 2 people.[/red]")
+                continue
+            share = round(full_amount / n, 2)
+            console.print(f"  [green]${full_amount:.2f} ÷ {n} = ${share:.2f}[/green]")
+            return share
+        except ValueError:
+            console.print("  [red]Enter a whole number (e.g. 3).[/red]")
 
 
 def _prompt_custom_split(full_amount: float) -> float:
