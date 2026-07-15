@@ -105,9 +105,9 @@ def append_row(config: dict, transaction: dict) -> None:
     amt_cell.number_format = AMOUNT_FMT
     amt_cell.alignment = CENTER
     cat_cell = ws.cell(row=next_row, column=5, value=transaction["category"])      # E: Category
-    cat_cell.alignment = RIGHT
+    cat_cell.alignment = CENTER
     subcat_cell = ws.cell(row=next_row, column=6, value=transaction["subcategory"])  # F: Subcategory
-    subcat_cell.alignment = RIGHT
+    subcat_cell.alignment = CENTER
     item_cell = ws.cell(row=next_row, column=7, value=transaction["item"])          # G: Item
     item_cell.alignment = RIGHT
 
