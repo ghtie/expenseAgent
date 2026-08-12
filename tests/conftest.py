@@ -50,6 +50,21 @@ def config(tmp_path):
 
 
 @pytest.fixture
+def sample_bofa_body():
+    """Bank of America alert email body (after HTML stripping)."""
+    return (
+        "Bank of America.\n"
+        "Credit card transaction\n"
+        "Cash Rewards Visa ending in 2221\n"
+        "Amount:\n$59.08\n"
+        "Date:\nAugust 11, 2026\n"
+        "Where:\nWEEE INC.\n"
+        "If you made this purchase or payment but don't recognize the amount, "
+        "wait until the final purchase amount has posted before filing a dispute claim.\n"
+    )
+
+
+@pytest.fixture
 def sample_categories():
     return {
         "Trader Joes": "Groceries",

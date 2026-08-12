@@ -121,7 +121,8 @@ def _extract_subject(headers: list[dict]) -> str:
 DEFAULT_GMAIL_QUERY = (
     "is:unread ("
     "from:notification.capitalone.com OR "
-    "(from:venmo.com subject:\"You paid\")"
+    "(from:venmo.com subject:\"You paid\") OR "
+    "from:ealerts.bankofamerica.com"
     ")"
 )
 

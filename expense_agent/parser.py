@@ -65,6 +65,14 @@ _VENMO_NOTE = re.compile(
     r"\n(?P<note>[^$\n][^\n]+)\n\s*See transaction",
 )
 
+# Bank of America HTML alert emails (after HTML stripping) contain:
+#   Amount:  $95.57
+#   Date:    August 11, 2026
+#   Where:   WEEE INC.
+_BOFA_AMOUNT = re.compile(r"Amount:\s*\*?\$(?P<amount>[\d,]+\.\d{2})\*?", re.IGNORECASE)
+_BOFA_DATE = re.compile(r"Date:\s*\*?(?P<date>[A-Z][a-z]+\.?\s+\d{1,2},\s*\d{4})\*?", re.IGNORECASE)
+_BOFA_WHERE = re.compile(r"Where:\s*\*?(?P<merchant>[^\n*]+)\*?", re.IGNORECASE)
+
 
 def _parse_date(date_str: str) -> str:
     """Convert a date string like 'February 19, 2026' or 'Feb 19, 2026' or 'Apr. 25, 2026' to MM/DD/YYYY."""
@@ -141,6 +149,32 @@ def parse_venmo(email_text: str, subject: str) -> dict:
     }
 
 
+def parse_bofa(email_text: str) -> dict:
+    """Extract transaction from a Bank of America alert email."""
+    amount_match = _BOFA_AMOUNT.search(email_text)
+    if not amount_match:
+        raise ParsingError("Could not parse Bank of America email: no amount found.")
+
+    date_match = _BOFA_DATE.search(email_text)
+    if not date_match:
+        raise ParsingError("Could not parse Bank of America email: no date found.")
+
+    where_match = _BOFA_WHERE.search(email_text)
+    if not where_match:
+        raise ParsingError("Could not parse Bank of America email: no merchant found.")
+
+    raw_merchant = where_match.group("merchant").strip()
+
+    return {
+        "date": _parse_date(date_match.group("date")),
+        "item": _clean_merchant(raw_merchant),
+        "amount": float(amount_match.group("amount").replace(",", "")),
+        "category": "Misc",
+        "subcategory": "Misc",
+        "_raw_merchant": raw_merchant,
+    }
+
+
 def _detect_capitalone(email_text: str) -> bool:
     text_lower = email_text.lower()
     return "capital one" in text_lower or "capitalone.com" in text_lower
@@ -149,6 +183,11 @@ def _detect_capitalone(email_text: str) -> bool:
 def _detect_venmo(email_text: str) -> bool:
     text_lower = email_text.lower()
     return "venmo" in text_lower or "venmo.com" in text_lower
+
+
+def _detect_bofa(email_text: str) -> bool:
+    text_lower = email_text.lower()
+    return "bank of america" in text_lower or "bankofamerica.com" in text_lower
 
 
 # Registry mapping source name → detect function and parse function.
@@ -161,6 +200,10 @@ PARSERS: dict[str, dict] = {
     "venmo": {
         "detect": _detect_venmo,
         "parse": lambda text, subject: parse_venmo(text, subject),
+    },
+    "bofa": {
+        "detect": _detect_bofa,
+        "parse": lambda text, subject: parse_bofa(text),
     },
 }
 

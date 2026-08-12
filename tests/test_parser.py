@@ -1,7 +1,7 @@
 """Tests for parser.py — date parsing, merchant cleaning, and email parsing."""
 
 import pytest
-from expense_agent.parser import _parse_date, _clean_merchant, parse_capitalone, parse_venmo, parse_transaction, ParsingError
+from expense_agent.parser import _parse_date, _clean_merchant, parse_capitalone, parse_venmo, parse_bofa, parse_transaction, ParsingError
 
 
 # ---------- _parse_date ----------
@@ -204,6 +204,58 @@ class TestParseVenmo:
         assert result["item"] == "Venmo Payment"
 
 
+# ---------- parse_bofa ----------
+
+class TestParseBofa:
+    def test_basic(self, sample_bofa_body):
+        result = parse_bofa(sample_bofa_body)
+        assert result["date"] == "08/11/2026"
+        assert result["item"] == "Weee Inc."
+        assert result["amount"] == 59.08
+
+    def test_returns_raw_merchant(self, sample_bofa_body):
+        result = parse_bofa(sample_bofa_body)
+        assert result["_raw_merchant"] == "WEEE INC."
+
+    def test_defaults(self, sample_bofa_body):
+        result = parse_bofa(sample_bofa_body)
+        assert result["category"] == "Misc"
+        assert result["subcategory"] == "Misc"
+
+    def test_comma_amount(self):
+        body = (
+            "Bank of America.\n"
+            "Amount:\n$1,234.56\n"
+            "Date:\nJanuary 5, 2026\n"
+            "Where:\nBIG STORE\n"
+        )
+        result = parse_bofa(body)
+        assert result["amount"] == 1234.56
+
+    def test_merchant_with_dots(self):
+        body = (
+            "Bank of America.\n"
+            "Amount:\n$95.57\n"
+            "Date:\nAugust 11, 2026\n"
+            "Where:\nBosch, Thermador, Gaggena\n"
+        )
+        result = parse_bofa(body)
+        assert result["item"] == "Bosch, Thermador, Gaggena"
+        assert result["date"] == "08/11/2026"
+
+    def test_no_amount_raises(self):
+        with pytest.raises(ParsingError):
+            parse_bofa("Bank of America.\nDate:\nAugust 11, 2026\nWhere:\nSTORE\n")
+
+    def test_no_date_raises(self):
+        with pytest.raises(ParsingError):
+            parse_bofa("Bank of America.\nAmount:\n$10.00\nWhere:\nSTORE\n")
+
+    def test_no_merchant_raises(self):
+        with pytest.raises(ParsingError):
+            parse_bofa("Bank of America.\nAmount:\n$10.00\nDate:\nAugust 11, 2026\n")
+
+
 # ---------- parse_transaction ----------
 
 class TestParseTransaction:
@@ -214,6 +266,11 @@ class TestParseTransaction:
     def test_dispatch_venmo(self, sample_venmo_subject, sample_venmo_body):
         result = parse_transaction(sample_venmo_body, "venmo", sample_venmo_subject)
         assert result["amount"] == 10.31
+
+    def test_dispatch_bofa(self, sample_bofa_body):
+        result = parse_transaction(sample_bofa_body, "bofa")
+        assert result["date"] == "08/11/2026"
+        assert result["amount"] == 59.08
 
     def test_unknown_source_raises(self):
         with pytest.raises(ParsingError):
